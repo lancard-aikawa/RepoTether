@@ -32,7 +32,7 @@ struct CacheEntry {
     session: Session,
 }
 
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 3;
 
 /// projects_dir 以下の全セッションを要約する。cache_path にキャッシュを読み書きする。
 pub fn load_all(projects_dir: &Path, cache_path: &Path) -> Result<Vec<Session>, String> {
@@ -164,7 +164,8 @@ fn summarize(path: &Path) -> Option<Session> {
         if s.entrypoint.is_none() {
             s.entrypoint = r.entrypoint.clone();
         }
-        if r.git_branch.as_deref().is_some_and(|b| !b.is_empty()) {
+        // git リポジトリ外のフォルダでは "HEAD" が入るので捨てる
+        if r.git_branch.as_deref().is_some_and(|b| !b.is_empty() && b != "HEAD") {
             s.git_branch = r.git_branch.clone();
         }
         let sidechain = r.is_sidechain.unwrap_or(false);
@@ -178,6 +179,10 @@ fn summarize(path: &Path) -> Option<Session> {
                 let Some(text) = r.message.and_then(|m| m.content).and_then(user_text) else {
                     continue;
                 };
+                // バックグラウンド処理の完了通知は人の入力ではない
+                if text.trim_start().starts_with("<task-notification>") {
+                    continue;
+                }
                 let text = clean_prompt(&text);
                 if text.is_empty() || text.starts_with("[Request interrupted") {
                     continue;
@@ -247,6 +252,7 @@ fn user_text(c: Content) -> Option<String> {
 fn clean_prompt(text: &str) -> String {
     static NOISE: OnceLock<Vec<Regex>> = OnceLock::new();
     static COMMAND: OnceLock<Regex> = OnceLock::new();
+    static PASTED: OnceLock<Regex> = OnceLock::new();
     let noise = NOISE.get_or_init(|| {
         [
             "system-reminder",
@@ -265,7 +271,15 @@ fn clean_prompt(text: &str) -> String {
     });
     let command = COMMAND.get_or_init(|| Regex::new(r"(?s)<command-name>(.*?)</command-name>").unwrap());
 
-    let mut s = text.to_string();
+    let pasted =
+        PASTED.get_or_init(|| Regex::new(r"(?s)<pasted_content(?:\s[^>]*)?>.*?</pasted_content>").unwrap());
+
+    static LONE_TAG: OnceLock<Regex> = OnceLock::new();
+    // 閉じタグが無いもの (途中で切れた貼り付け) はタグだけ落として中身を残す
+    let lone = LONE_TAG.get_or_init(|| Regex::new(r"</?pasted_content(?:\s[^>]*)?>").unwrap());
+
+    let mut s = pasted.replace_all(text, " [貼り付け] ").into_owned();
+    s = lone.replace_all(&s, " ").into_owned();
     for re in noise {
         s = re.replace_all(&s, "").into_owned();
     }
@@ -288,5 +302,9 @@ mod tests {
             "/review"
         );
         assert_eq!(clean_prompt("<system-reminder>a\nb</system-reminder>"), "");
+        assert_eq!(
+            clean_prompt("見て <pasted_content id=\"x\">長い\n文章</pasted_content> どう?"),
+            "見て [貼り付け] どう?"
+        );
     }
 }

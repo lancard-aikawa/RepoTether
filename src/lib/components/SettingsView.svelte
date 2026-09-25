@@ -1,0 +1,368 @@
+<script lang="ts">
+  import type { Project } from "$lib/derive";
+  import { emailCandidates } from "$lib/derive";
+  import type { Account, AccountKind, Config } from "$lib/types";
+  import * as api from "$lib/api";
+  import { app, errorText, prefs, savePrefs, toast, updateConfig } from "$lib/store.svelte";
+
+  let { projects }: { projects: Project[] } = $props();
+
+  // 編集中の下書き。保存するまで app.config には反映しない
+  let draft = $state<Config>(structuredClone($state.snapshot(app.config!)));
+  let newEmail = $state("");
+  let saving = $state(false);
+
+  const dirty = $derived(JSON.stringify(draft) !== JSON.stringify(app.config));
+  const candidates = $derived(
+    app.snapshot
+      ? emailCandidates(app.snapshot)
+          .filter((c) => !draft.authorEmails.some((e) => e.toLowerCase() === c.email.toLowerCase()))
+          .slice(0, 8)
+      : [],
+  );
+
+  const hiddenRows = $derived(
+    draft.hidden.map((key) => {
+      const p = projects.find((x) => x.key === key || x.key === `remote:${key}`);
+      return { key, name: p?.name ?? key, path: p?.path ?? null };
+    }),
+  );
+
+  async function addRoot() {
+    const p = await api.pickFolder("リポジトリを探すフォルダ");
+    if (p && !draft.roots.some((r) => r.toLowerCase() === p.toLowerCase())) draft.roots.push(p);
+  }
+
+  async function pickCloneRoot() {
+    const p = await api.pickFolder("クローン先の親フォルダ", draft.cloneRoot ?? undefined);
+    if (p) draft.cloneRoot = p;
+  }
+
+  function addEmail(e: string) {
+    const v = e.trim();
+    if (v && !draft.authorEmails.some((x) => x.toLowerCase() === v.toLowerCase())) draft.authorEmails.push(v);
+    newEmail = "";
+  }
+
+  function addAccount(kind: AccountKind) {
+    const ids = new Set(draft.accounts.map((a) => a.id));
+    let i = 1;
+    while (ids.has(`acc${i}`)) i++;
+    const a: Account = {
+      id: `acc${i}`,
+      kind,
+      label: kind === "github" ? "GitHub" : kind === "gogs" ? "Gogs" : "Gitea",
+      baseUrl: "",
+      user: "",
+      token: "",
+      enabled: true,
+    };
+    draft.accounts.push(a);
+  }
+
+  async function save() {
+    saving = true;
+    try {
+      const accountsChanged = JSON.stringify(draft.accounts) !== JSON.stringify(app.config?.accounts);
+      await updateConfig(structuredClone($state.snapshot(draft)), { refresh: true, remote: accountsChanged });
+      toast("保存しました");
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      saving = false;
+    }
+  }
+
+  function revert() {
+    draft = structuredClone($state.snapshot(app.config!));
+  }
+
+  function setPref(k: "includeAutomated" | "showHidden", v: boolean) {
+    prefs[k] = v;
+    savePrefs();
+  }
+</script>
+
+<div class="wrap">
+  <div class="toolbar bar">
+    <span class="muted">{dirty ? "保存していない変更があります" : "設定"}</span>
+    <span class="spacer"></span>
+    <button onclick={revert} disabled={!dirty || saving}>元に戻す</button>
+    <button class="primary" onclick={save} disabled={!dirty || saving}>{saving ? "保存しています…" : "保存して更新"}</button>
+  </div>
+
+  <div class="scroll">
+    <section class="panel card">
+      <h2>リポジトリを探す場所</h2>
+      <ul class="rows">
+        {#each draft.roots as r, i (r)}
+          <li>
+            <span class="mono grow">{r}</span>
+            <button class="ghost" onclick={() => draft.roots.splice(i, 1)}>外す</button>
+          </li>
+        {:else}
+          <li class="muted">まだありません</li>
+        {/each}
+      </ul>
+      <button onclick={addRoot}>フォルダを追加</button>
+      <div class="grid">
+        <label for="depth">探す深さ</label>
+        <div><input id="depth" type="number" min="1" max="6" bind:value={draft.scanDepth} /> <span class="muted">階層</span></div>
+        <label for="days">コミットを読む期間</label>
+        <div><input id="days" type="number" min="7" max="3650" bind:value={draft.historyDays} /> <span class="muted">日</span></div>
+        <span></span>
+        <label class="check">
+          <input type="checkbox" bind:checked={draft.includeSessionFolders} />
+          Claude のセッションで使ったフォルダも、git リポジトリなら対象にする (探す場所の外でも)
+        </label>
+      </div>
+    </section>
+
+    <section class="panel card">
+      <h2>自分のコミット</h2>
+      <p class="muted">履歴・グラフ・日報は、ここにあるメールアドレスのコミットだけを数えます。空なら全員分を数えます。</p>
+      <ul class="rows">
+        {#each draft.authorEmails as e, i (e)}
+          <li>
+            <span class="mono grow">{e}</span>
+            <button class="ghost" onclick={() => draft.authorEmails.splice(i, 1)}>外す</button>
+          </li>
+        {/each}
+      </ul>
+      <div class="inline">
+        <input type="text" placeholder="メールアドレス" bind:value={newEmail} onkeydown={(e) => e.key === "Enter" && addEmail(newEmail)} />
+        <button onclick={() => addEmail(newEmail)} disabled={!newEmail.trim()}>追加</button>
+      </div>
+      {#if candidates.length}
+        <h3 class="sub">コミットに出てくるアドレス</h3>
+        <ul class="rows">
+          {#each candidates as c (c.email)}
+            <li>
+              <span class="mono grow">{c.email}</span>
+              <span class="muted">{c.name} / {c.count} 件</span>
+              <button onclick={() => addEmail(c.email)}>追加</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </section>
+
+    <section class="panel card">
+      <h2>リモートのアカウント</h2>
+      <p class="muted">
+        トークンがあれば見られる全リポジトリ、無ければユーザー名の公開リポジトリを取ります。トークンは設定ファイル
+        (%APPDATA%\com.repotether.app\config.json) に平文で保存されます。読み取り権限だけのトークンを使ってください。
+      </p>
+      {#each draft.accounts as a, i (a.id)}
+        <div class="account">
+          <div class="acc-head">
+            <strong>{a.label || a.kind}</strong>
+            <span class="muted">{a.kind}</span>
+            <span class="spacer"></span>
+            <label class="check"><input type="checkbox" bind:checked={a.enabled} /> 使う</label>
+            <button class="ghost" onclick={() => draft.accounts.splice(i, 1)}>削除</button>
+          </div>
+          <div class="grid">
+            <label for="label-{a.id}">表示名</label>
+            <input id="label-{a.id}" type="text" bind:value={a.label} />
+            <label for="url-{a.id}">{a.kind === "github" ? "API の URL" : "サーバーの URL"}</label>
+            <input
+              id="url-{a.id}"
+              type="text"
+              class="mono"
+              placeholder={a.kind === "github" ? "空なら https://api.github.com" : "https://git.example.com"}
+              bind:value={a.baseUrl}
+            />
+            <label for="user-{a.id}">ユーザー名</label>
+            <input id="user-{a.id}" type="text" placeholder="トークンなしのときに使う" bind:value={a.user} />
+            <label for="token-{a.id}">トークン</label>
+            <input id="token-{a.id}" type="password" autocomplete="off" bind:value={a.token} />
+          </div>
+        </div>
+      {/each}
+      <div class="inline">
+        <button onclick={() => addAccount("github")}>GitHub を追加</button>
+        <button onclick={() => addAccount("gogs")}>Gogs を追加</button>
+        <button onclick={() => addAccount("gitea")}>Gitea を追加</button>
+      </div>
+      {#if app.snapshot?.remoteFetchedAt}
+        <p class="muted">最後に取得: {new Date(app.snapshot.remoteFetchedAt).toLocaleString()} / {app.snapshot.remoteRepos.length} 件</p>
+      {/if}
+    </section>
+
+    <section class="panel card">
+      <h2>その他</h2>
+      <div class="grid">
+        <label for="clone-root">クローン先の親フォルダ</label>
+        <div class="inline">
+          <input id="clone-root" type="text" class="mono grow" bind:value={draft.cloneRoot} placeholder="空なら探す場所の 1 つ目" />
+          <button onclick={pickCloneRoot}>参照</button>
+        </div>
+        <label for="claude-dir">Claude のログの場所</label>
+        <input id="claude-dir" type="text" class="mono" bind:value={draft.claudeDir} placeholder="空なら %USERPROFILE%\.claude\projects" />
+      </div>
+    </section>
+
+    <section class="panel card">
+      <h2>表示 <span class="muted small">(すぐに反映・この PC だけ)</span></h2>
+      <div class="col">
+        <label class="check">
+          <input type="checkbox" checked={prefs.includeAutomated} onchange={(e) => setPref("includeAutomated", e.currentTarget.checked)} />
+          SDK などからの自動実行のセッションも活動に数える
+        </label>
+        <label class="check">
+          <input type="checkbox" checked={prefs.showHidden} onchange={(e) => setPref("showHidden", e.currentTarget.checked)} />
+          一覧から外したプロジェクトも表示する
+        </label>
+      </div>
+    </section>
+
+    {#if hiddenRows.length}
+      <section class="panel card">
+        <h2>一覧から外したもの</h2>
+        <ul class="rows">
+          {#each hiddenRows as h, i (h.key)}
+            <li>
+              <span class="grow">{h.name} <span class="mono muted small">{h.path ?? h.key}</span></span>
+              <button class="ghost" onclick={() => draft.hidden.splice(i, 1)}>戻す</button>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
+    {#if app.snapshot?.errors.length}
+      <section class="panel card">
+        <h2>読み込みの問題</h2>
+        <ul class="rows">
+          {#each app.snapshot.errors as e, i (i)}
+            <li><span class="muted mono">{e.source}</span> <span class="grow">{e.message}</span></li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+  </div>
+</div>
+
+<style>
+  .wrap {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .bar {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .scroll {
+    overflow-y: auto;
+    flex: 1;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .card {
+    padding: 14px 16px;
+    max-width: 860px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .card > * {
+    max-width: 100%;
+  }
+
+  .card h2 {
+    margin: 0;
+  }
+
+  .sub {
+    margin: 8px 0 0;
+    color: var(--ink-2);
+  }
+
+  p {
+    margin: 0;
+  }
+
+  .rows {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+  }
+
+  .rows li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .grow {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 6px 12px;
+    align-items: center;
+    width: 100%;
+  }
+
+  .grid label:not(.check) {
+    color: var(--ink-2);
+  }
+
+  input[type="number"] {
+    width: 80px;
+  }
+
+  .inline {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .account {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .acc-head {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+
+  .small {
+    font-size: 12px;
+  }
+</style>

@@ -1,156 +1,233 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { onMount } from "svelte";
+  import { app, prefs, init, refresh, savePrefs, type Tab } from "$lib/store.svelte";
+  import { buildProjects } from "$lib/derive";
+  import { inTauri } from "$lib/api";
+  import { relative, toMs } from "$lib/format";
+  import StateView from "$lib/components/StateView.svelte";
+  import HistoryView from "$lib/components/HistoryView.svelte";
+  import GraphView from "$lib/components/GraphView.svelte";
+  import ReportView from "$lib/components/ReportView.svelte";
+  import SettingsView from "$lib/components/SettingsView.svelte";
 
-  let name = $state("");
-  let greetMsg = $state("");
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "state", label: "状態" },
+    { id: "history", label: "履歴" },
+    { id: "graph", label: "グラフ" },
+    { id: "report", label: "日報" },
+    { id: "settings", label: "設定" },
+  ];
 
-  async function greet(event: Event) {
-    event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsg = await invoke("greet", { name });
+  const projects = $derived(
+    app.snapshot && app.config
+      ? buildProjects(app.snapshot, app.config, { includeAutomated: prefs.includeAutomated })
+      : [],
+  );
+  const visible = $derived(prefs.showHidden ? projects : projects.filter((p) => !p.hidden));
+
+  // 相対時刻の表示を 1 分ごとに進める
+  let now = $state(Date.now());
+
+  onMount(() => {
+    init();
+    const t = setInterval(() => (now = Date.now()), 60000);
+    return () => clearInterval(t);
+  });
+
+  function selectTab(t: Tab) {
+    prefs.tab = t;
+    savePrefs();
   }
 </script>
 
-<main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
+<div class="shell">
+  <header>
+    <div class="brand">RepoTether</div>
+    <div class="tabs" role="tablist">
+      {#each tabs as t (t.id)}
+        <button
+          role="tab"
+          class="tab"
+          class:on={prefs.tab === t.id}
+          aria-selected={prefs.tab === t.id}
+          onclick={() => selectTab(t.id)}>{t.label}</button
+        >
+      {/each}
+    </div>
+    <div class="status">
+      {#if app.busy}
+        <span class="spinner" aria-hidden="true"></span>
+        <span>{app.progress}</span>
+      {:else if app.snapshot}
+        <span class="muted" title={app.snapshot.generatedAt}
+          >更新 {relative(toMs(app.snapshot.generatedAt), now)}</span
+        >
+      {/if}
+      {#if !inTauri}<span class="badge info">ブラウザ表示 (読み取りのみ)</span>{/if}
+      <button onclick={() => refresh(false)} disabled={app.busy} title="ローカルのリポジトリと Claude のセッションを読み直す"
+        >更新</button
+      >
+      <button
+        onclick={() => refresh(true)}
+        disabled={app.busy || !app.config?.accounts.some((a) => a.enabled)}
+        title="GitHub / Gogs のリポジトリ一覧も取り直す">リモートも更新</button
+      >
+    </div>
+  </header>
 
-  <div class="row">
-    <a href="https://vite.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
-  </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
+  {#if app.error}
+    <div class="error-bar" role="alert">
+      <span>{app.error}</span>
+      <button class="ghost" onclick={() => (app.error = "")}>閉じる</button>
+    </div>
+  {/if}
 
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
-  </form>
-  <p>{greetMsg}</p>
-</main>
+  <main>
+    {#if !app.snapshot || !app.config}
+      <div class="empty">
+        {#if app.busy}
+          <p>{app.progress || "読み込んでいます"}</p>
+          <p class="muted">初回は Claude のセッションログをすべて読むため、30 秒ほどかかります。</p>
+        {:else}
+          <p>データがありません。「更新」を押してください。</p>
+        {/if}
+      </div>
+    {:else if prefs.tab === "state"}
+      <StateView projects={visible} {now} />
+    {:else if prefs.tab === "history"}
+      <HistoryView projects={visible} />
+    {:else if prefs.tab === "graph"}
+      <GraphView projects={visible} {now} />
+    {:else if prefs.tab === "report"}
+      <ReportView projects={visible} />
+    {:else}
+      <SettingsView {projects} />
+    {/if}
+  </main>
+
+  {#if app.toast}
+    <div class="toast" role="status">{app.toast}</div>
+  {/if}
+</div>
 
 <style>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
-
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
+  .shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
   }
 
-  a:hover {
-    color: #24c8db;
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 12px;
+    height: 44px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    flex: none;
   }
 
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
+  .brand {
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.02em;
   }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
 
+  .tabs {
+    display: flex;
+    gap: 2px;
+    align-self: stretch;
+  }
+
+  .tab {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 0 14px;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+
+  .tab:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .tab.on {
+    color: var(--ink);
+    font-weight: 600;
+    border-bottom-color: var(--accent);
+  }
+
+  .status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .status > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--line-strong);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex: none;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .error-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: color-mix(in srgb, var(--st-high) 12%, var(--surface));
+    border-bottom: 1px solid var(--line);
+  }
+
+  .error-bar span {
+    flex: 1;
+  }
+
+  main {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .empty {
+    margin: auto;
+    text-align: center;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: var(--bg);
+    padding: 8px 16px;
+    border-radius: var(--radius);
+    max-width: 80vw;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    z-index: 100;
+  }
 </style>
