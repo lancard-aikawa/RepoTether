@@ -87,7 +87,8 @@ pub fn build_local(cfg: &Config, cache_dir: &Path, progress: &(dyn Fn(String) + 
             .map(|id| id.to_string());
     }
     sessions.sort_by(|a, b| b.started_at.cmp(&a.started_at));
-    commits.sort_by(|a, b| b.at.cmp(&a.at));
+    // git の日時は作者のオフセット付き (+09:00 / -05:00 など) なので、文字列ではなく時刻で比べる
+    commits.sort_by_cached_key(|c| std::cmp::Reverse(chrono::DateTime::parse_from_rfc3339(&c.at).ok()));
 
     Snapshot {
         generated_at: chrono::Local::now().to_rfc3339(),
