@@ -58,11 +58,21 @@ impl Default for Config {
 }
 
 impl Config {
+    /// 無ければ既定値。読めないときは既定値で起動するが、次の保存で上書きして
+    /// トークンなどを失わないよう、元のファイルを config.broken.json に退避する。
     pub fn load(path: &Path) -> Config {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return Config::default();
+        };
+        match serde_json::from_str(text.trim_start_matches('\u{feff}')) {
+            Ok(c) => c,
+            Err(e) => {
+                let backup = path.with_file_name("config.broken.json");
+                let _ = std::fs::copy(path, &backup);
+                eprintln!("{} を読めません ({e})。{} に退避しました", path.display(), backup.display());
+                Config::default()
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {

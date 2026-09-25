@@ -1,6 +1,7 @@
 //! アプリを起動せずに取り込みだけを実行し、結果を JSON で書き出す。
 //! 使い方: cargo run --release --example dump -- <出力先.json> [--remote]
 //! 設定はアプリと同じ %APPDATA%\com.repotether.app\config.json を読む。
+//! 環境変数 REPOTETHER_CONFIG で別の設定ファイルを指定できる。
 
 use std::path::PathBuf;
 
@@ -13,7 +14,10 @@ async fn main() {
     let with_remote = args.iter().any(|a| a == "--remote");
 
     let appdata = PathBuf::from(std::env::var_os("APPDATA").expect("APPDATA"));
-    let cfg = Config::load(&appdata.join("com.repotether.app").join("config.json"));
+    let cfg_path = std::env::var_os("REPOTETHER_CONFIG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| appdata.join("com.repotether.app").join("config.json"));
+    let cfg = Config::load(&cfg_path);
     let cache_dir = std::env::temp_dir().join("repotether-dump-cache");
 
     let t = std::time::Instant::now();

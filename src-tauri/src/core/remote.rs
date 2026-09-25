@@ -71,7 +71,13 @@ pub async fn fetch(account: &Account) -> Result<Vec<RemoteRepo>, String> {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(format!("{status}: {}", util::truncate_chars(body.trim(), 200)));
+            let hint = match status.as_u16() {
+                401 | 403 if token.is_empty() => " (このサーバーはトークンが必要です)",
+                401 => " (トークンが無効か期限切れです)",
+                404 if token.is_empty() => " (ユーザー名か URL を確認してください)",
+                _ => "",
+            };
+            return Err(format!("{status}{hint}: {}", util::truncate_chars(body.trim(), 200)));
         }
         let items: Vec<Value> = resp.json().await.map_err(|e| format!("応答を読めません: {e}"))?;
         let n = items.len();
