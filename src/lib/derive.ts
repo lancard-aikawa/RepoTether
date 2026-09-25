@@ -248,9 +248,12 @@ export function leftoversOf(p: Project): Leftover[] {
   return out;
 }
 
+/** 取り残しに数えないもの。読めないリポジトリは「読めない」で別に絞り込む */
+const NOT_LEFTOVER = new Set(["noRemote", "noUpstream", "dubious", "error"]);
+
 /** 「取り残し」とみなすもの (情報だけのものは除く) */
 export function hasLeftovers(p: Project): boolean {
-  return p.leftovers.some((l) => l.severity !== "info" && l.kind !== "noRemote" && l.kind !== "noUpstream");
+  return p.leftovers.some((l) => l.severity !== "info" && !NOT_LEFTOVER.has(l.kind));
 }
 
 export function leftoverWeight(p: Project): number {
