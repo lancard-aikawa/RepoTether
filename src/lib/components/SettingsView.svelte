@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { SvelteSet } from "svelte/reactivity";
   import type { Project } from "$lib/derive";
   import { emailCandidates } from "$lib/derive";
   import type { Account, AccountKind, Config } from "$lib/types";
   import * as api from "$lib/api";
-  import { app, errorText, prefs, savePrefs, toast, updateConfig } from "$lib/store.svelte";
+  import { app, errorText, prefs, refresh, savePrefs, toast, updateConfig } from "$lib/store.svelte";
 
   let { projects }: { projects: Project[] } = $props();
 
@@ -11,6 +12,16 @@
   let draft = $state<Config>(structuredClone($state.snapshot(app.config!)));
   let newEmail = $state("");
   let saving = $state(false);
+  /** 保存済みのトークンを入れ直そうとしているアカウント */
+  const replacing = new SvelteSet<string>();
+
+  async function openStore() {
+    try {
+      await api.openSecretStore();
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
 
   const dirty = $derived(JSON.stringify(draft) !== JSON.stringify(app.config));
   const candidates = $derived(
@@ -55,6 +66,8 @@
       baseUrl: "",
       user: "",
       token: "",
+      hasToken: false,
+      clearToken: false,
       enabled: true,
     };
     draft.accounts.push(a);
@@ -64,8 +77,11 @@
     saving = true;
     try {
       const accountsChanged = JSON.stringify(draft.accounts) !== JSON.stringify(app.config?.accounts);
-      await updateConfig(structuredClone($state.snapshot(draft)), { refresh: true, remote: accountsChanged });
+      await updateConfig(structuredClone($state.snapshot(draft)));
+      // 入力したトークンは保存後に消えるので、保存後の設定から下書きを作り直す
+      revert();
       toast("保存しました");
+      await refresh(accountsChanged);
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -75,6 +91,7 @@
 
   function revert() {
     draft = structuredClone($state.snapshot(app.config!));
+    replacing.clear();
   }
 
   function setPref(k: "includeAutomated" | "showHidden", v: boolean) {
@@ -150,9 +167,11 @@
     <section class="panel card">
       <h2>リモートのアカウント</h2>
       <p class="muted">
-        トークンがあれば見られる全リポジトリ、無ければユーザー名の公開リポジトリを取ります。トークンは設定ファイル
-        (%APPDATA%\com.repotether.app\config.json) に平文で保存されます。読み取り権限だけのトークンを使ってください。
+        トークンがあれば見られる全リポジトリ、無ければユーザー名の公開リポジトリを取ります (Gogs はトークンが必須)。
+        トークンは設定ファイルではなく {api.secretStoreName} に保存され、この画面にも表示されません。
+        読み取り権限だけのトークンを使ってください。
       </p>
+      <button onclick={openStore}>{api.secretStoreApp}を開く</button>
       {#each draft.accounts as a, i (a.id)}
         <div class="account">
           <div class="acc-head">
@@ -176,7 +195,32 @@
             <label for="user-{a.id}">ユーザー名</label>
             <input id="user-{a.id}" type="text" placeholder="トークンなしのときに使う" bind:value={a.user} />
             <label for="token-{a.id}">トークン</label>
-            <input id="token-{a.id}" type="password" autocomplete="off" bind:value={a.token} />
+            {#if a.hasToken && !a.clearToken && !replacing.has(a.id)}
+              <div class="inline">
+                <span class="badge good">{api.secretStoreName}に保存済み</span>
+                <button onclick={() => replacing.add(a.id)}>入れ直す</button>
+                <button class="ghost" onclick={() => (a.clearToken = true)}>消す</button>
+              </div>
+            {:else if a.clearToken}
+              <div class="inline">
+                <span class="badge mid">保存すると消します</span>
+                <button class="ghost" onclick={() => (a.clearToken = false)}>やめる</button>
+              </div>
+            {:else}
+              <div class="inline">
+                <input
+                  id="token-{a.id}"
+                  type="password"
+                  autocomplete="off"
+                  class="grow"
+                  placeholder={a.hasToken ? "新しいトークン" : ""}
+                  bind:value={a.token}
+                />
+                {#if replacing.has(a.id)}
+                  <button class="ghost" onclick={() => (replacing.delete(a.id), (a.token = ""))}>やめる</button>
+                {/if}
+              </div>
+            {/if}
           </div>
         </div>
       {/each}

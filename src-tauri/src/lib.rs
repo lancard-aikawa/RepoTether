@@ -1,4 +1,5 @@
 pub mod core;
+mod launch;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -24,16 +25,26 @@ impl AppState {
     }
 }
 
+/// トークンは返さない (資格情報マネージャーにあるかどうかだけ)
 #[tauri::command]
 fn get_config(state: State<AppState>) -> Config {
-    state.config.lock().unwrap().clone()
+    state.config.lock().unwrap().for_view()
 }
 
+/// 新しいトークンや削除の指示があれば資格情報マネージャーに反映してから、トークン抜きで保存する
 #[tauri::command]
-fn save_config(state: State<AppState>, config: Config) -> Result<(), String> {
+fn save_config(state: State<AppState>, mut config: Config) -> Result<Config, String> {
+    let prev = state.config.lock().unwrap().clone();
+    config.store_secrets(&prev)?;
     config.save(&state.config_path)?;
-    *state.config.lock().unwrap() = config;
-    Ok(())
+    *state.config.lock().unwrap() = config.clone();
+    Ok(config.for_view())
+}
+
+/// OS の資格情報の保管庫 (Windows: 資格情報マネージャー / macOS: キーチェーンアクセス) を開く
+#[tauri::command]
+fn open_credential_manager() -> Result<(), String> {
+    launch::secret_store()
 }
 
 #[tauri::command]
@@ -107,17 +118,9 @@ fn open_in(target: String, path: String) -> Result<(), String> {
         return Err(format!("{} がありません", p.display()));
     }
     match target.as_str() {
-        "vscode" => {
-            let exe = find_vscode().ok_or("VS Code が見つかりません")?;
-            let mut cmd = Command::new(exe);
-            cmd.arg(&p);
-            util::hide_window(&mut cmd);
-            cmd.spawn().map_err(|e| e.to_string())?;
-        }
-        "terminal" => open_terminal(&p)?,
-        "explorer" => {
-            Command::new("explorer.exe").arg(&p).spawn().map_err(|e| e.to_string())?;
-        }
+        "vscode" => launch::vscode(&p)?,
+        "terminal" => launch::terminal(&p)?,
+        "explorer" => launch::folder(&p)?,
         t => return Err(format!("未対応の開き方です: {t}")),
     }
     Ok(())
@@ -163,50 +166,6 @@ async fn save_text_with_dialog(
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 
-fn find_vscode() -> Option<PathBuf> {
-    // PATH の ...\Microsoft VS Code\bin\code.cmd から Code.exe を引く
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            if dir.join("code.cmd").is_file() {
-                if let Some(exe) = dir.parent().map(|p| p.join("Code.exe")).filter(|e| e.is_file()) {
-                    return Some(exe);
-                }
-            }
-        }
-    }
-    let mut cands = vec![];
-    if let Some(l) = std::env::var_os("LOCALAPPDATA") {
-        cands.push(PathBuf::from(l).join("Programs").join("Microsoft VS Code").join("Code.exe"));
-    }
-    if let Some(p) = std::env::var_os("ProgramFiles") {
-        cands.push(PathBuf::from(p).join("Microsoft VS Code").join("Code.exe"));
-    }
-    cands.into_iter().find(|c| c.is_file())
-}
-
-fn open_terminal(dir: &Path) -> Result<(), String> {
-    // Windows Terminal があればそれを使う
-    let mut wt = Command::new("wt.exe");
-    wt.arg("-d").arg(dir);
-    if wt.spawn().is_ok() {
-        return Ok(());
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-        Command::new("powershell.exe")
-            .arg("-NoExit")
-            .current_dir(dir)
-            .creation_flags(CREATE_NEW_CONSOLE)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-        Ok(())
-    }
-    #[cfg(not(windows))]
-    Err("端末を開けません".into())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -215,8 +174,19 @@ pub fn run() {
         .setup(|app| {
             let config_path = app.path().app_config_dir()?.join("config.json");
             let cache_dir = app.path().app_cache_dir()?;
+            let mut config = Config::load(&config_path);
+            // 以前の版の平文トークンを資格情報マネージャーへ移し、設定ファイルから消す
+            match config.migrate_plaintext_tokens() {
+                Ok(true) => {
+                    if let Err(e) = config.save(&config_path) {
+                        eprintln!("トークン移行後の保存に失敗しました: {e}");
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => eprintln!("トークンを資格情報マネージャーへ移せませんでした: {e}"),
+            }
             app.manage(AppState {
-                config: Mutex::new(Config::load(&config_path)),
+                config: Mutex::new(config),
                 config_path,
                 cache_dir,
                 refreshing: AtomicBool::new(false),
@@ -231,7 +201,8 @@ pub fn run() {
             clone_repo,
             open_in,
             trust_repo,
-            save_text_with_dialog
+            save_text_with_dialog,
+            open_credential_manager
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2943,6 +2943,7 @@ dependencies = [
  "chrono",
  "regex",
  "reqwest",
+ "security-framework",
  "serde",
  "serde_json",
  "tauri",
@@ -2950,6 +2951,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

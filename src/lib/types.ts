@@ -119,6 +119,11 @@ export interface Account {
   label: string;
   baseUrl: string;
   user: string;
+  /** 新しく入れたトークン (書き込み専用)。バックエンドは返さない */
   token: string;
+  /** OS の資格情報の保管庫にトークンがあるか */
+  hasToken: boolean;
+  /** 保存時にトークンを消す */
+  clearToken: boolean;
   enabled: boolean;
 }

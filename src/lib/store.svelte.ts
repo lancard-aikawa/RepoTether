@@ -82,8 +82,7 @@ export async function refresh(includeRemote: boolean) {
 }
 
 export async function updateConfig(next: Config, opts: { refresh?: boolean; remote?: boolean } = {}) {
-  await api.saveConfig(next);
-  app.config = next;
+  app.config = await api.saveConfig(next);
   if (opts.refresh) await refresh(opts.remote ?? false);
 }
 

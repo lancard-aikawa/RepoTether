@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use super::util;
+use super::{secrets, util};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -36,9 +36,34 @@ pub struct Account {
     pub base_url: String,
     /// トークンなしで公開リポジトリだけ取るときのユーザー名
     pub user: String,
-    /// アクセストークン。設定ファイルに平文で保存される
+    /// 画面から受け取る新しいトークン (書き込み専用)。保存時に資格情報マネージャーへ移し、
+    /// 設定ファイルには書かない。画面にも返さない
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub token: String,
+    /// 資格情報マネージャーにトークンがあるか
+    pub has_token: bool,
+    /// 画面からの「トークンを消す」指示 (保存時に処理して false に戻す)
+    #[serde(skip_serializing_if = "is_false")]
+    pub clear_token: bool,
     pub enabled: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+impl Account {
+    /// API を呼ぶときのトークン。資格情報マネージャーから読む
+    pub fn resolve_token(&self) -> Result<String, String> {
+        if !self.token.trim().is_empty() {
+            return Ok(self.token.trim().to_string());
+        }
+        if !self.has_token {
+            return Ok(String::new());
+        }
+        secrets::get(&secrets::target(&self.id))?
+            .ok_or_else(|| "資格情報マネージャーにトークンがありません。設定で入れ直してください".into())
+    }
 }
 
 impl Default for Config {
@@ -83,6 +108,50 @@ impl Config {
         std::fs::write(path, json).map_err(|e| e.to_string())
     }
 
+    /// 画面から来たトークンの変更を資格情報マネージャーに反映し、設定からはトークンを消す。
+    /// prev にあって self に無いアカウントのトークンも消す。
+    pub fn store_secrets(&mut self, prev: &Config) -> Result<(), String> {
+        for a in &mut self.accounts {
+            let target = secrets::target(&a.id);
+            if a.clear_token {
+                secrets::delete(&target)?;
+                a.has_token = false;
+            } else if !a.token.trim().is_empty() {
+                let user = if a.user.is_empty() { &a.label } else { &a.user };
+                secrets::set(&target, user, a.token.trim())?;
+                a.has_token = true;
+            }
+            a.token.clear();
+            a.clear_token = false;
+        }
+        for old in &prev.accounts {
+            if !self.accounts.iter().any(|a| a.id == old.id) {
+                secrets::delete(&secrets::target(&old.id))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// 以前の版で平文のトークンが入っていれば、資格情報マネージャーへ移す。移したら true
+    pub fn migrate_plaintext_tokens(&mut self) -> Result<bool, String> {
+        if !self.accounts.iter().any(|a| !a.token.trim().is_empty()) {
+            return Ok(false);
+        }
+        let prev = self.clone();
+        self.store_secrets(&prev)?;
+        Ok(true)
+    }
+
+    /// 画面に渡す形。トークンは含めない (has_token だけ)
+    pub fn for_view(&self) -> Config {
+        let mut c = self.clone();
+        for a in &mut c.accounts {
+            a.token.clear();
+            a.clear_token = false;
+        }
+        c
+    }
+
     pub fn claude_projects_dir(&self) -> Option<PathBuf> {
         match &self.claude_dir {
             Some(d) if !d.trim().is_empty() => Some(PathBuf::from(d)),
@@ -98,9 +167,17 @@ fn default_roots() -> Vec<String> {
         cands.push(h.join("Repos"));
         cands.push(h.join("source").join("repos"));
         cands.push(h.join("src"));
+        // macOS でよく使われる場所
+        if cfg!(target_os = "macos") {
+            cands.push(h.join("Developer"));
+            cands.push(h.join("Projects"));
+            cands.push(h.join("code"));
+        }
     }
-    for d in ['C', 'D', 'E', 'F'] {
-        cands.push(PathBuf::from(format!("{d}:\\Repos")));
+    if cfg!(windows) {
+        for d in ['C', 'D', 'E', 'F'] {
+            cands.push(PathBuf::from(format!("{d}:\\Repos")));
+        }
     }
     let mut out: Vec<String> = vec![];
     for c in cands {
@@ -121,4 +198,52 @@ fn global_git_email() -> Option<String> {
     let out = cmd.output().ok()?;
     let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (!s.is_empty()).then_some(s)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    fn account(id: &str, token: &str) -> Account {
+        Account { id: id.into(), kind: "github".into(), token: token.into(), enabled: true, ..Default::default() }
+    }
+
+    #[test]
+    fn plaintext_token_moves_to_secret_store_and_leaves_file() {
+        let id = "test-migrate";
+        let target = secrets::target(id);
+        let mut cfg = Config { accounts: vec![account(id, "ghp_plain")], ..Default::default() };
+
+        assert!(cfg.migrate_plaintext_tokens().unwrap());
+        assert!(cfg.accounts[0].has_token);
+        assert_eq!(cfg.accounts[0].token, "");
+        assert_eq!(secrets::get(&target).unwrap().as_deref(), Some("ghp_plain"));
+        assert_eq!(cfg.accounts[0].resolve_token().unwrap(), "ghp_plain");
+
+        // 設定ファイルにはトークンも clearToken も書かれない
+        let dir = std::env::temp_dir().join("repotether-config-test");
+        let path = dir.join("config.json");
+        cfg.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("ghp_plain"));
+        assert!(!text.contains("\"token\""));
+        assert!(!text.contains("clearToken"));
+        assert!(Config::load(&path).accounts[0].has_token);
+
+        // 消す指示
+        let prev = cfg.clone();
+        cfg.accounts[0].clear_token = true;
+        cfg.store_secrets(&prev).unwrap();
+        assert!(!cfg.accounts[0].has_token);
+        assert_eq!(secrets::get(&target).unwrap(), None);
+
+        // アカウントを消したらトークンも消える
+        let mut with = Config { accounts: vec![account(id, "ghp_again")], ..Default::default() };
+        with.store_secrets(&Config::default()).unwrap();
+        let mut without = Config { accounts: vec![], ..Default::default() };
+        without.store_secrets(&with).unwrap();
+        assert_eq!(secrets::get(&target).unwrap(), None);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }

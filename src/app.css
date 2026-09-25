@@ -28,8 +28,8 @@
   --heat-4: #184f95;
 
   --radius: 6px;
-  --font: "Segoe UI", "Yu Gothic UI", "Meiryo UI", system-ui, sans-serif;
-  --mono: "Cascadia Mono", Consolas, "BIZ UDGothic", monospace;
+  --font: "Segoe UI", "Yu Gothic UI", "Meiryo UI", -apple-system, "Hiragino Sans", system-ui, sans-serif;
+  --mono: "Cascadia Mono", Consolas, "BIZ UDGothic", ui-monospace, Menlo, monospace;
 }
 
 @media (prefers-color-scheme: dark) {

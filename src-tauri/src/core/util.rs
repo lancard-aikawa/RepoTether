@@ -41,6 +41,7 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 /// 表示用のパス。区切りをバックスラッシュに、ドライブ文字を大文字にそろえる。
+#[cfg(windows)]
 pub fn display_path(p: &str) -> String {
     let mut s: String = p.replace('/', "\\");
     while s.len() > 3 && s.ends_with('\\') {
@@ -53,10 +54,33 @@ pub fn display_path(p: &str) -> String {
     chars.into_iter().collect()
 }
 
-/// 照合用のキー。Windows のパスは大文字小文字を区別しないので小文字にする。
+/// 表示用のパス。末尾の区切りだけ落とす。
+#[cfg(not(windows))]
+pub fn display_path(p: &str) -> String {
+    let mut s = p.to_string();
+    while s.len() > 1 && s.ends_with('/') {
+        s.pop();
+    }
+    s
+}
+
+/// 照合用のキー。Windows と macOS (APFS の既定) はパスの大文字小文字を区別しないので小文字にする。
 /// Claude のログには `c:\Repos\...` と `C:\Repos\...` が混ざっている。
 pub fn path_key(p: &str) -> String {
-    display_path(p).to_lowercase()
+    let s = display_path(p);
+    if cfg!(any(windows, target_os = "macos")) {
+        s.to_lowercase()
+    } else {
+        s
+    }
+}
+
+/// path_key の子孫か (同じパスを含む)。"foo" と "foobar" を取り違えないよう区切りで判定する
+pub fn is_under(key: &str, parent_key: &str) -> bool {
+    key == parent_key
+        || key
+            .strip_prefix(parent_key)
+            .is_some_and(|rest| rest.starts_with(std::path::MAIN_SEPARATOR))
 }
 
 pub fn system_time_to_rfc3339(t: SystemTime) -> String {
@@ -136,10 +160,14 @@ mod tests {
         assert_eq!(remote_key("/srv/git/bar.git"), None);
     }
 
+    #[cfg(windows)]
     #[test]
     fn path_normalization() {
         assert_eq!(display_path("c:/Repos/x/"), r"C:\Repos\x");
         assert_eq!(path_key(r"C:\Repos\X"), path_key("c:/repos/x"));
         assert_eq!(display_path(r"C:\"), r"C:\");
+        assert!(is_under(r"c:\repos\foo\sub", r"c:\repos\foo"));
+        assert!(is_under(r"c:\repos\foo", r"c:\repos\foo"));
+        assert!(!is_under(r"c:\repos\foobar", r"c:\repos\foo"));
     }
 }

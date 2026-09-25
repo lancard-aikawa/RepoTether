@@ -25,9 +25,13 @@
   let running = $state(false);
   let error = $state("");
 
-  const dest = $derived(parent && name ? `${parent.replace(/[\\/]+$/, "")}\\${name}` : "");
+  function trimSep(p: string): string {
+    return p.length > 1 ? p.replace(/[\\/]+$/, "") : p;
+  }
+
+  const dest = $derived(parent && name ? `${trimSep(parent)}${api.sep}${name}` : "");
   const underRoot = $derived(
-    (app.config?.roots ?? []).some((r) => dest.toLowerCase().startsWith(r.toLowerCase().replace(/[\\/]+$/, "") + "\\")),
+    (app.config?.roots ?? []).some((r) => dest.toLowerCase().startsWith(trimSep(r).toLowerCase() + api.sep)),
   );
 
   async function browse() {

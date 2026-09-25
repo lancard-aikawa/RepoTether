@@ -6,13 +6,26 @@ import type { Config, Snapshot } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+export const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
+export const isWindows = typeof navigator !== "undefined" && /Windows/.test(navigator.userAgent);
+/** パスの区切り */
+export const sep = isWindows ? "\\" : "/";
+/** OS の資格情報の保管庫の呼び名 */
+export const secretStoreName = isMac ? "キーチェーン" : isWindows ? "資格情報マネージャー" : "資格情報の保管庫";
+export const secretStoreApp = isMac ? "キーチェーンアクセス" : secretStoreName;
+
+export async function openSecretStore(): Promise<void> {
+  if (!inTauri) throw new Error("ブラウザ表示では開けません");
+  return call("open_credential_manager");
+}
+
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(cmd, args);
 }
 
 const mockConfig: Config = {
-  roots: ["C:\\Repos"],
+  roots: [isWindows ? "C:\\Repos" : "~/Repos"],
   scanDepth: 3,
   includeSessionFolders: true,
   claudeDir: null,
@@ -28,10 +41,18 @@ export async function getConfig(): Promise<Config> {
   return call("get_config");
 }
 
-export async function saveConfig(config: Config): Promise<void> {
+/** 保存後の設定 (トークンは抜いたもの) を返す */
+export async function saveConfig(config: Config): Promise<Config> {
   if (!inTauri) {
-    Object.assign(mockConfig, structuredClone(config));
-    return;
+    const next = structuredClone(config);
+    for (const a of next.accounts) {
+      if (a.clearToken) a.hasToken = false;
+      else if (a.token.trim()) a.hasToken = true;
+      a.token = "";
+      a.clearToken = false;
+    }
+    Object.assign(mockConfig, next);
+    return structuredClone(next);
   }
   return call("save_config", { config });
 }

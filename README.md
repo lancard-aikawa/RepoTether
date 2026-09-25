@@ -35,16 +35,44 @@
 
 ## データの置き場所
 
-| もの | 場所 |
-|---|---|
-| 設定 | `%APPDATA%\com.repotether.app\config.json` (トークンも平文でここに入る) |
-| 取り込み結果のキャッシュ | `%LOCALAPPDATA%\com.repotether.app\snapshot.json` |
-| セッション要約のキャッシュ | `%LOCALAPPDATA%\com.repotether.app\sessions-cache.json` |
+| もの | Windows | macOS |
+|---|---|---|
+| 設定 | `%APPDATA%\com.repotether.app\config.json` | `~/Library/Application Support/com.repotether.app/config.json` |
+| トークン | 資格情報マネージャー (`RepoTether:<アカウント ID>`) | ログインキーチェーン (サービス `RepoTether`) |
+| 取り込み結果・セッション要約のキャッシュ | `%LOCALAPPDATA%\com.repotether.app\` | `~/Library/Caches/com.repotether.app/` |
+
+どれもリポジトリの外にあるので、git の対象にはならない。
+
+### トークン
+
+トークンは設定ファイルに書かず、OS の資格情報の保管庫に置く (Windows は DPAPI、macOS はキーチェーンで、
+OS のログインに結びつけて暗号化される)。画面にも返さず、「保存済み」とだけ出す。入れ直すか消すかを選べる。
+設定画面から資格情報マネージャー / キーチェーンアクセスを開ける。
+
+以前の版で `config.json` に平文で入っていたトークンは、起動時に保管庫へ移して設定ファイルから消す。
+同じユーザーとして動くプログラムからは読めてしまうので、読み取り権限だけのトークンを使う。
 
 Claude のログは全体で数百 MB あるので、ファイルの更新時刻とサイズが同じなら前回の要約を使う。
 初回は 30 秒ほど、2 回目以降は 5 秒ほど (96 リポジトリ・330 セッションで計測)。
 
 設定ファイルが壊れて読めないときは、`config.broken.json` に退避してから既定値で起動する。
+
+## macOS
+
+コードは OS ごとに分けてあり、macOS 向けに自前のコード (`core/` と `launch.rs`) がコンパイルできることは
+Windows 上で確認済み (`aarch64-apple-darwin`)。アプリ全体のビルドと動作は Mac 実機での確認が必要。
+
+| 項目 | Windows | macOS |
+|---|---|---|
+| VS Code で開く | Code.exe を直接起動 | `open -a "Visual Studio Code"` |
+| 端末 | Windows Terminal (無ければ PowerShell) | `open -a Terminal` |
+| フォルダ | エクスプローラー | Finder |
+| 既定の探す場所 | `~/Repos`、`~/source/repos`、`~/src`、`C〜F:\Repos` | `~/Repos`、`~/src`、`~/Developer`、`~/Projects`、`~/code` |
+| パスの照合 | 大文字小文字を区別しない | 区別しない (APFS の既定) |
+
+- Mac 用のビルドは Mac の上で行う (`pnpm tauri build`)。Windows からのクロスビルドはしない
+- 署名・公証はしていないので、初回は右クリック →「開く」で起動する
+- Linux は対象外 (動くかもしれないが、端末を開く・トークンの保存は未対応)
 
 ## 読めないリポジトリ
 
@@ -94,11 +122,13 @@ cargo run --release --example dump -- ../static/dev-snapshot.json --remote   # �
 ```
 src-tauri/src/
   lib.rs            Tauri のコマンド (設定・更新・クローン・開く・保存ダイアログ)
+  launch.rs         VS Code / 端末 / フォルダ / 資格情報の保管庫を開く (OS ごと)
   core/             取り込み。Tauri に依存しない
     discover.rs     リポジトリを探す
     git.rs          git の状態とコミット、クローン
     sessions.rs     Claude のセッションの要約とキャッシュ
     remote.rs       GitHub / Gogs / Gitea の一覧
+    secrets.rs      トークンの保存 (Windows: 資格情報マネージャー / macOS: キーチェーン)
     model.rs        画面に渡すデータの形
 src/lib/
   derive.ts         取り込み結果をプロジェクト単位にまとめる。取り残しの判定、履歴・活動の集計
@@ -110,4 +140,4 @@ src/lib/
 
 - セッションの要約を LLM で作る (使うなら無料の経路: `claude -p` のサブスク枠 / ローカルの gemma)
 - Gogs / Gitea のトークンありでの取得は未検証 (公開分の GitHub と、Gogs の 403 応答までは確認済み)
-- トークンを Windows の資格情報マネージャーに置く
+- Mac 実機での動作確認

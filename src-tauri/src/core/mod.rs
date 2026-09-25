@@ -5,6 +5,7 @@ pub mod discover;
 pub mod git;
 pub mod model;
 pub mod remote;
+pub mod secrets;
 pub mod sessions;
 pub mod util;
 
@@ -83,7 +84,7 @@ pub fn build_local(cfg: &Config, cache_dir: &Path, progress: &(dyn Fn(String) + 
         let key = util::path_key(cwd);
         s.repo_id = ids
             .iter()
-            .find(|id| key == **id || key.starts_with(&format!("{id}\\")))
+            .find(|id| util::is_under(&key, id))
             .map(|id| id.to_string());
     }
     sessions.sort_by(|a, b| b.started_at.cmp(&a.started_at));
@@ -129,7 +130,12 @@ pub async fn fetch_remotes(cfg: &Config) -> (Vec<RemoteRepo>, Vec<SourceError>) 
     let mut repos = vec![];
     let mut errors = vec![];
     for a in cfg.accounts.iter().filter(|a| a.enabled) {
-        match remote::fetch(a).await {
+        // トークンは資格情報マネージャーから、呼ぶ直前に読む
+        let result = match a.resolve_token() {
+            Ok(token) => remote::fetch(&config::Account { token, ..a.clone() }).await,
+            Err(e) => Err(e),
+        };
+        match result {
             Ok(rs) => repos.extend(rs),
             Err(e) => errors.push(SourceError {
                 source: format!("remote:{}", a.id),
