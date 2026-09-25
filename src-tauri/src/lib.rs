@@ -99,6 +99,10 @@ async fn clone_repo(url: String, dest: String) -> Result<String, String> {
 #[tauri::command]
 fn open_in(target: String, path: String) -> Result<(), String> {
     let p = PathBuf::from(util::display_path(&path));
+    // 絶対パスだけ受け付ける (先頭が "-" の値をオプションとして解釈させない)
+    if !p.is_absolute() {
+        return Err(format!("絶対パスではありません: {path}"));
+    }
     if !p.exists() {
         return Err(format!("{} がありません", p.display()));
     }
@@ -123,6 +127,9 @@ fn open_in(target: String, path: String) -> Result<(), String> {
 /// ユーザーのグローバル設定の safe.directory に追加する。
 #[tauri::command]
 fn trust_repo(path: String) -> Result<(), String> {
+    if !Path::new(&path).is_absolute() {
+        return Err(format!("絶対パスではありません: {path}"));
+    }
     let p = util::display_path(&path).replace('\\', "/");
     let mut cmd = Command::new("git");
     cmd.args(["config", "--global", "--add", "safe.directory", &p]);
@@ -134,9 +141,26 @@ fn trust_repo(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 保存ダイアログを出し、ユーザーが選んだ場所にだけ書く。
+/// 画面側から任意のパスに書けないよう、パスは受け取らない。キャンセルなら None。
 #[tauri::command]
-fn write_text_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+async fn save_text_with_dialog(
+    app: AppHandle,
+    default_name: String,
+    content: String,
+) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("Markdown", &["md"])
+        .add_filter("テキスト", &["txt"])
+        .blocking_save_file();
+    let Some(fp) = picked else { return Ok(None) };
+    let path = fp.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 fn find_vscode() -> Option<PathBuf> {
@@ -207,7 +231,7 @@ pub fn run() {
             clone_repo,
             open_in,
             trust_repo,
-            write_text_file
+            save_text_with_dialog
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

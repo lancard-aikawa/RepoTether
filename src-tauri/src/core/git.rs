@@ -261,13 +261,21 @@ fn read_log(path: &Path, repo_id: &str, history_days: u32) -> Result<Vec<Commit>
 
 /// `git clone <url> <dest>`。認証は git の資格情報マネージャーに任せる。
 pub fn clone(url: &str, dest: &Path) -> Result<(), String> {
+    let ok_scheme = ["https://", "http://", "ssh://", "git://"].iter().any(|s| url.starts_with(s))
+        || (url.contains('@') && util::remote_key(url).is_some() && !url.contains("://"));
+    if url.starts_with('-') || !ok_scheme {
+        return Err(format!("クローンできない URL です: {url}"));
+    }
+    if !dest.is_absolute() {
+        return Err("クローン先は絶対パスで指定してください".into());
+    }
     if dest.exists() {
         return Err(format!("{} は既にあります", dest.display()));
     }
     let parent = dest.parent().ok_or("クローン先が不正です")?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let mut cmd = std::process::Command::new("git");
-    cmd.arg("clone").arg(url).arg(dest).env("GIT_TERMINAL_PROMPT", "0");
+    cmd.arg("clone").arg("--").arg(url).arg(dest).env("GIT_TERMINAL_PROMPT", "0");
     util::hide_window(&mut cmd);
     let out = cmd.output().map_err(|e| format!("git を起動できません: {e}"))?;
     if !out.status.success() {
