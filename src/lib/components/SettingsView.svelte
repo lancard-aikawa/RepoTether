@@ -103,6 +103,40 @@
     replacing.clear();
   }
 
+  // ---- タブ ----
+  type SettingsTab = "roots" | "authors" | "accounts" | "other" | "hidden" | "errors";
+  const saved = $derived(app.config!);
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const tabs = $derived(
+    (
+      [
+        {
+          id: "roots",
+          label: "探す場所",
+          dirty: !same(
+            [draft.roots, draft.scanDepth, draft.historyDays, draft.includeSessionFolders],
+            [saved.roots, saved.scanDepth, saved.historyDays, saved.includeSessionFolders],
+          ),
+        },
+        { id: "authors", label: "自分のコミット", dirty: !same(draft.authorEmails, saved.authorEmails) },
+        { id: "accounts", label: "アカウント", dirty: !same(draft.accounts, saved.accounts) },
+        {
+          id: "other",
+          label: "その他",
+          dirty: !same([draft.cloneRoot, draft.claudeDir], [saved.cloneRoot, saved.claudeDir]),
+        },
+        { id: "hidden", label: "非表示", count: draft.hidden.length, dirty: !same(draft.hidden, saved.hidden) },
+        { id: "errors", label: "問題", count: app.snapshot?.errors.length ?? 0, dirty: false },
+      ] as { id: SettingsTab; label: string; count?: number; dirty: boolean }[]
+    ).filter((t) => t.id !== "errors" || t.count),
+  );
+  const tab = $derived(tabs.some((t) => t.id === prefs.settingsTab) ? prefs.settingsTab : "roots");
+
+  function selectTab(t: SettingsTab) {
+    prefs.settingsTab = t;
+    savePrefs();
+  }
+
   function setPref(k: "includeAutomated", v: boolean) {
     prefs[k] = v;
     savePrefs();
@@ -117,7 +151,18 @@
     <button class="primary" onclick={save} disabled={!dirty || saving}>{saving ? "保存しています…" : "保存して更新"}</button>
   </div>
 
+  <div class="tabs" role="tablist">
+    {#each tabs as t (t.id)}
+      <button role="tab" class="tab" class:on={tab === t.id} aria-selected={tab === t.id} onclick={() => selectTab(t.id)}>
+        {t.label}
+        {#if t.count}<span class="count num">{t.count}</span>{/if}
+        {#if t.dirty}<span class="dirty" title="保存していない変更があります"></span>{/if}
+      </button>
+    {/each}
+  </div>
+
   <div class="scroll">
+    {#if tab === "roots"}
     <section class="panel card">
       <h2>リポジトリを探す場所</h2>
       <ul class="rows">
@@ -143,7 +188,9 @@
         </label>
       </div>
     </section>
+    {/if}
 
+    {#if tab === "authors"}
     <section class="panel card">
       <h2>自分のコミット</h2>
       <p class="muted">履歴・グラフ・日報は、ここにあるメールアドレスのコミットだけを数えます。空なら全員分を数えます。</p>
@@ -172,7 +219,9 @@
         </ul>
       {/if}
     </section>
+    {/if}
 
+    {#if tab === "accounts"}
     <section class="panel card">
       <h2>リモートのアカウント</h2>
       <p class="muted">
@@ -267,7 +316,9 @@
         <p class="muted">最後に取得: {new Date(app.snapshot.remoteFetchedAt).toLocaleString()} / {app.snapshot.remoteRepos.length} 件</p>
       {/if}
     </section>
+    {/if}
 
+    {#if tab === "other"}
     <section class="panel card">
       <h2>その他</h2>
       <div class="grid">
@@ -291,9 +342,14 @@
       </div>
     </section>
 
-    {#if hiddenRows.length}
+    {/if}
+
+    {#if tab === "hidden"}
       <section class="panel card">
         <h2>非表示にしたもの</h2>
+        {#if !hiddenRows.length}
+          <p class="muted">ありません。状態タブで行にカーソルを乗せると「非表示」ボタンが出ます。</p>
+        {/if}
         <ul class="rows">
           {#each hiddenRows as h, i (h.key)}
             <li>
@@ -305,7 +361,7 @@
       </section>
     {/if}
 
-    {#if app.snapshot?.errors.length}
+    {#if tab === "errors" && app.snapshot?.errors.length}
       <section class="panel card">
         <h2>読み込みの問題</h2>
         <ul class="rows">
@@ -333,6 +389,57 @@
 
   .spacer {
     flex: 1;
+  }
+
+  /* タブ: 選んでいるものは下線と太字で、はっきり分かるように */
+  .tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    flex: none;
+  }
+
+  .tab {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 8px 12px 7px;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .tab:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .tab.on {
+    color: var(--ink);
+    font-weight: 600;
+    border-bottom-color: var(--accent);
+  }
+
+  .count {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--ink-2);
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 0 6px;
+  }
+
+  /* 保存していない変更がある印 */
+  .dirty {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
   }
 
   .scroll {

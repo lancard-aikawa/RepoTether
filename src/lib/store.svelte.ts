@@ -27,6 +27,8 @@ export const prefs = $state({
   reportView: "split" as ReportViewMode,
   /** 未クローンのフォーク・アーカイブを状態タブで隠す */
   hideForkArchived: false,
+  /** 設定で最後に開いたタブ */
+  settingsTab: "roots" as "roots" | "authors" | "accounts" | "other" | "hidden" | "errors",
 });
 
 export type ReportViewMode = "edit" | "split" | "preview";
