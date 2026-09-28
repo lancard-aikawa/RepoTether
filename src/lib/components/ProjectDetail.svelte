@@ -53,6 +53,33 @@
 
   const r = $derived(project.local);
 
+  // ---- README (有無でタブを出し分けるので、選んだ時点で読む) ----
+  type ReadmeState =
+    | { state: "loading" }
+    | { state: "found"; readme: api.Readme }
+    | { state: "none" }
+    | { state: "error"; message: string };
+  let readme = $state<ReadmeState>({ state: "none" });
+
+  $effect(() => {
+    const path = project.path;
+    if (!path) {
+      readme = { state: "none" };
+      return;
+    }
+    readme = { state: "loading" };
+    let cancelled = false;
+    api
+      .readReadme(path)
+      .then((r) => {
+        if (!cancelled) readme = r ? { state: "found", readme: r } : { state: "none" };
+      })
+      .catch((e) => {
+        if (!cancelled) readme = { state: "error", message: errorText(e) };
+      });
+    return () => (cancelled = true);
+  });
+
   // ---- タブ ----
   const tabs = $derived(
     (
@@ -61,7 +88,8 @@
         { id: "git", label: "git", show: project.kind !== "folder" },
         { id: "commits", label: "コミット", count: project.myCommits.length, show: project.commits.length > 0 },
         { id: "claude", label: "Claude", count: project.sessions.length, show: project.sessions.length > 0 },
-        { id: "readme", label: "README", show: !!project.path },
+        // 読み込み中は出しておき、無いと分かったら消す (タブがちらつかないように)
+        { id: "readme", label: "README", show: readme.state === "loading" || readme.state === "found" },
       ] as { id: DetailTab; label: string; count?: number; show: boolean }[]
     ).filter((t) => t.show),
   );
@@ -323,8 +351,12 @@
       </section>
     {/if}
 
-    {#if tab === "readme" && project.path}
-      <ReadmeView path={project.path} link={webLink} />
+    {#if tab === "readme"}
+      {#if readme.state === "found"}
+        <ReadmeView readme={readme.readme} link={webLink} />
+      {:else if readme.state === "loading"}
+        <p class="muted">読み込んでいます…</p>
+      {/if}
     {/if}
   </div>
 </aside>

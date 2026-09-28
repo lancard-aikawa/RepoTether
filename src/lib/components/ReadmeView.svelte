@@ -5,25 +5,8 @@
   import { errorText, toast } from "$lib/store.svelte";
   import type { RemoteLink } from "$lib/remotes";
 
-  let { path, link }: { path: string; link: RemoteLink | null } = $props();
-
-  let readme = $state<api.Readme | null>(null);
-  let loading = $state(true);
-  let error = $state("");
-
-  $effect(() => {
-    const p = path;
-    loading = true;
-    error = "";
-    readme = null;
-    let cancelled = false;
-    api
-      .readReadme(p)
-      .then((r) => !cancelled && (readme = r))
-      .catch((e) => !cancelled && (error = errorText(e)))
-      .finally(() => !cancelled && (loading = false));
-    return () => (cancelled = true);
-  });
+  // 読み込みは詳細パネル側 (README の有無でタブを出し分けるため)
+  let { readme, link }: { readme: api.Readme; link: RemoteLink | null } = $props();
 
   /** GitHub なら相対パスを github.com の URL にする (ほかのサービスはブランチ名の形が違うので解決しない) */
   function resolve(rel: string, raw: boolean): string | null {
@@ -80,23 +63,15 @@
   }
 </script>
 
-{#if loading}
-  <p class="muted">読み込んでいます…</p>
-{:else if error}
-  <p class="muted">{error}</p>
-{:else if !readme}
-  <p class="muted">README はありません。</p>
+<div class="meta muted">
+  {readme.name}
+  {#if readme.truncated}<span> (長いので先頭の 1MB だけ)</span>{/if}
+</div>
+{#if readme.markdown}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="md" onclick={onClick}>{@html html}</div>
 {:else}
-  <div class="meta muted">
-    {readme.name}
-    {#if readme.truncated}<span> (長いので先頭の 1MB だけ)</span>{/if}
-  </div>
-  {#if readme.markdown}
-    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="md" onclick={onClick}>{@html html}</div>
-  {:else}
-    <pre class="plain">{readme.content}</pre>
-  {/if}
+  <pre class="plain">{readme.content}</pre>
 {/if}
 
 <style>

@@ -130,7 +130,10 @@ export interface Readme {
 /** リポジトリ直下の README。無ければ null */
 export async function readReadme(path: string): Promise<Readme | null> {
   if (!inTauri) {
-    // ブラウザ表示ではファイルを読めないので、無害化の確認を兼ねた見本を返す
+    // ブラウザ表示ではファイルを読めないので、無害化の確認を兼ねた見本を返す。
+    // 画面の確認用に window.__noReadme に入れたパスは「README なし」にする
+    const none = (window as unknown as { __noReadme?: string[] }).__noReadme;
+    if (none?.includes(path)) return null;
     return {
       name: "README.md (ブラウザ表示の見本)",
       markdown: true,
