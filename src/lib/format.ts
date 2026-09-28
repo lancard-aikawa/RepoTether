@@ -87,6 +87,14 @@ export function daysSince(ms: number | null, now = Date.now()): number | null {
   return ms == null ? null : Math.floor((now - ms) / 86400000);
 }
 
+/**
+ * 検索の比較用。大文字小文字と、パスの区切り (\ と /) を区別しない。
+ * "repos/mywork" でも "Repos\mywork" でも C:\Repos\mywork に当たるように、両方を / にそろえる
+ */
+export function searchKey(s: string): string {
+  return s.toLowerCase().replace(/\\/g, "/");
+}
+
 export function formatDuration(ms: number): string {
   const min = Math.round(ms / 60000);
   if (min < 60) return `${min} 分`;

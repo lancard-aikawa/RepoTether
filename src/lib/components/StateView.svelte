@@ -2,7 +2,7 @@
   import type { Project } from "$lib/derive";
   import { hasLeftovers, leftoverWeight } from "$lib/derive";
   import type { RemoteKind } from "$lib/remotes";
-  import { relative } from "$lib/format";
+  import { relative, searchKey } from "$lib/format";
   import { folderTree, tagTree, type TreeNode } from "$lib/tree";
   import { errorText, moveTag, prefs, savePrefs, toast, type StateViewMode } from "$lib/store.svelte";
   import ProjectDetail from "./ProjectDetail.svelte";
@@ -109,16 +109,17 @@
   }
 
   const shown = $derived.by(() => {
-    const q = query.trim().toLowerCase();
+    const q = searchKey(query.trim());
     let xs = byVisibility.filter((p) => matchesFilter(p, filter) && matchesRemote(p, remoteFilter));
     if (q) {
+      const hit = (s: string | null | undefined) => !!s && searchKey(s).includes(q);
       xs = xs.filter(
         (p) =>
-          p.name.toLowerCase().includes(q) ||
-          (p.path ?? "").toLowerCase().includes(q) ||
-          p.tags.some((t) => t.toLowerCase().includes(q)) ||
-          p.remotes.some((r) => r.fullName.toLowerCase().includes(q)) ||
-          p.links.some((l) => l.label.toLowerCase().includes(q) || l.url.toLowerCase().includes(q)),
+          hit(p.name) ||
+          hit(p.path) ||
+          p.tags.some(hit) ||
+          p.remotes.some((r) => hit(r.fullName)) ||
+          p.links.some((l) => hit(l.label) || hit(l.url)),
       );
     }
     return xs;

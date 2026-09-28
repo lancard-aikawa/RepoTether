@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { HistoryItem, Project } from "$lib/derive";
   import { historyItems } from "$lib/derive";
-  import { addDays, dayKey, formatDayLong, formatTime, startOfDay } from "$lib/format";
+  import { addDays, dayKey, formatDayLong, formatTime, searchKey, startOfDay } from "$lib/format";
   import { prefs, savePrefs } from "$lib/store.svelte";
 
   let { projects }: { projects: Project[] } = $props();
@@ -36,8 +36,8 @@
       includeAutomated: prefs.includeAutomated,
       kinds: { commit: showCommits, session: showSessions },
     });
-    const q = query.trim().toLowerCase();
-    if (q) xs = xs.filter((i) => textOf(i).toLowerCase().includes(q) || i.project.name.toLowerCase().includes(q));
+    const q = searchKey(query.trim());
+    if (q) xs = xs.filter((i) => searchKey(textOf(i)).includes(q) || searchKey(i.project.name).includes(q));
     return xs;
   });
 
