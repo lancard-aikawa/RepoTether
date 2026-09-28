@@ -107,7 +107,21 @@
   </main>
 
   {#if app.toast}
-    <div class="toast" role="status">{app.toast}</div>
+    <div class="toast" role="status">
+      <span>{app.toast}</span>
+      {#if app.toastAction}
+        <button
+          class="toast-btn"
+          onclick={() => {
+            // 消す前に取り出す (消すと app.toastAction は null になる)
+            const action = app.toastAction;
+            app.toast = "";
+            app.toastAction = null;
+            action?.run();
+          }}>{app.toastAction.label}</button
+        >
+      {/if}
+    </div>
   {/if}
 </div>
 
@@ -230,5 +244,19 @@
     max-width: 80vw;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
     z-index: 100;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .toast-btn {
+    background: transparent;
+    color: var(--bg);
+    border-color: color-mix(in srgb, var(--bg) 50%, transparent);
+    padding: 2px 10px;
+  }
+
+  .toast-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--bg) 15%, transparent);
   }
 </style>

@@ -1,7 +1,8 @@
 // タグの操作。タグは "仕事/客先/案件" のような / 区切りの文字列で、3 階層まで。
 //
 // - config.tags: プロジェクト (prefKey) ごとに付けたタグ
-// - config.tagDefs: 作ったタグの一覧。プロジェクトが無くなってもタグは残す (削除するまで)
+// - config.tagDefs: 作ったタグの一覧。プロジェクトが無くなってもタグは残す (削除するまで)。
+//   並び順がそのまま表示の順 (同じ階層の中での順)
 //
 // 操作は Config を受け取って新しい Config を返す純粋な関数。問題があれば Error を投げる。
 
@@ -40,16 +41,28 @@ function ancestorsOf(t: string): string[] {
   return parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
 }
 
-/** 存在するタグすべて (作ったもの + 使っているもの + それらの上の階層) */
+/**
+ * 存在するタグすべて (作ったもの + 使っているもの + それらの上の階層)。
+ * tagDefs の順を保ち、上の階層は下の階層より前に置く (同じ階層の中の並びは、最初に出てきた順)
+ */
 export function definedTags(cfg: Config): string[] {
-  const set = new Set<string>();
+  const out: string[] = [];
+  const seen = new Set<string>();
   const add = (t: string) => {
-    set.add(t);
-    ancestorsOf(t).forEach((a) => set.add(a));
+    for (const a of [...ancestorsOf(t), t]) {
+      if (!seen.has(a)) {
+        seen.add(a);
+        out.push(a);
+      }
+    }
   };
   (cfg.tagDefs ?? []).forEach(add);
-  Object.values(cfg.tags ?? {}).forEach((ts) => ts.forEach(add));
-  return [...set].sort((a, b) => a.localeCompare(b, "ja"));
+  // 一覧に無いもの (以前の版で付けたタグなど) は名前順で後ろに
+  Object.values(cfg.tags ?? {})
+    .flat()
+    .sort((a, b) => a.localeCompare(b, "ja"))
+    .forEach(add);
+  return out;
 }
 
 /** path か、その下の階層のタグが付いているプロジェクトの数 */
@@ -57,8 +70,9 @@ export function usageCount(cfg: Config, path: string): number {
   return Object.values(cfg.tags ?? {}).filter((ts) => ts.some((t) => t === path || isAncestorTag(path, t))).length;
 }
 
-function withTagDefs(cfg: Config, defs: string[]): string[] {
-  return [...new Set(defs)].sort((a, b) => a.localeCompare(b, "ja"));
+/** 重複を除く (順は保つ) */
+function withTagDefs(_cfg: Config, defs: string[]): string[] {
+  return [...new Set(defs)];
 }
 
 /** プロジェクトのタグを付け替える。付けたタグは一覧にも登録する */
@@ -95,8 +109,8 @@ export function renameTag(cfg: Config, from: string, rawTo: string): Config {
 
   const tags: Record<string, string[]> = {};
   for (const [k, ts] of Object.entries(cfg.tags ?? {})) tags[k] = tidyTags(ts.map(map));
-  // 上の階層だけが作られていた場合も含めて、動いた先を一覧に残す
-  const defs = [...(cfg.tagDefs ?? []).map(map), ...moved.map(map)];
+  // 並び順を保ったまま名前を付け替える (使っているだけのタグも一覧に入れて位置を固定する)
+  const defs = definedTags(cfg).map(map);
   return { ...cfg, tags, tagDefs: withTagDefs(cfg, defs) };
 }
 
@@ -111,8 +125,30 @@ export function deleteTag(cfg: Config, path: string): Config {
     const next = tidyTags(ts.flatMap((t) => (gone(t) ? (parent ? [parent] : []) : [t])));
     if (next.length) tags[k] = next;
   }
-  const defs = (cfg.tagDefs ?? []).filter((t) => !gone(t));
-  // 親はプロジェクトが無くなっても残す
-  if (parent) defs.push(parent);
+  // 親はプロジェクトが無くなっても残す (definedTags に含まれているので、消えるものだけ除けばよい)
+  const defs = definedTags(cfg).filter((t) => !gone(t));
   return { ...cfg, tags, tagDefs: withTagDefs(cfg, defs) };
+}
+
+export type Placement = "before" | "after" | "into";
+
+/**
+ * タグを別のタグの前・後 (同じ階層へ) か、中 (下の階層へ) に動かす。下の階層も一緒に動く。
+ * before / after は並べ替え。階層が違えば、その階層へ移ってから並べる
+ */
+export function placeTag(cfg: Config, tag: string, target: string, pos: Placement): Config {
+  if (target === tag || isAncestorTag(tag, target)) throw new Error(`「${tag}」を自分の下の階層へは移せません`);
+  const parent = pos === "into" ? target : parentOf(target);
+  const dest = parent ? `${parent}/${leafOf(tag)}` : leafOf(tag);
+  const moved = dest === tag ? cfg : renameTag(cfg, tag, dest);
+  if (pos === "into") return moved;
+
+  // 動かしたタグ (と下の階層) を一覧から抜き、相手の前か後ろに入れる。
+  // 同じ階層の中の並びは一覧に最初に出てくる順なので、相手の直前・直後に置けばよい
+  let order = definedTags(moved);
+  const subtree = order.filter((t) => t === dest || isAncestorTag(dest, t));
+  order = order.filter((t) => !subtree.includes(t));
+  const i = order.indexOf(target);
+  order.splice(pos === "before" ? i : i + 1, 0, ...subtree);
+  return { ...moved, tagDefs: order };
 }

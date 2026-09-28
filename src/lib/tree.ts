@@ -30,10 +30,13 @@ function child(parent: TreeNode, id: string, label: string): TreeNode {
   return c;
 }
 
-/** 数を下から集計し、子を並べる。特別な入れ物は最後 */
-function finish(n: TreeNode, sortProjects: (xs: Project[]) => Project[]): TreeNode {
-  n.children.forEach((c) => finish(c, sortProjects));
-  n.children.sort((a, b) => Number(!!a.special) - Number(!!b.special) || a.label.localeCompare(b.label, "ja"));
+/** 数を下から集計し、子を並べる。特別な入れ物は最後。keepOrder なら子は作った順 (タグの並び) のまま */
+function finish(n: TreeNode, sortProjects: (xs: Project[]) => Project[], keepOrder = false): TreeNode {
+  n.children.forEach((c) => finish(c, sortProjects, keepOrder));
+  n.children.sort(
+    (a, b) =>
+      Number(!!a.special) - Number(!!b.special) || (keepOrder ? 0 : a.label.localeCompare(b.label, "ja")),
+  );
   n.projects = sortProjects(n.projects);
   const ids = new Set<string>();
   let left = 0;
@@ -105,7 +108,7 @@ function compress(n: TreeNode, root: TreeNode) {
 export function tagTree(
   projects: Project[],
   sortProjects: (xs: Project[]) => Project[],
-  /** 作ったタグ。プロジェクトが無くても見出しとして出す */
+  /** 作ったタグ (並べた順)。プロジェクトが無くても見出しとして出し、この順で並べる */
   defs: string[] = [],
 ): TreeNode {
   const root = node("", "");
@@ -132,5 +135,6 @@ export function tagTree(
     }
   }
   if (untagged.projects.length) root.children.push(untagged);
-  return finish(root, sortProjects);
+  // タグは自分で並べた順 (defs の順) で出す
+  return finish(root, sortProjects, true);
 }

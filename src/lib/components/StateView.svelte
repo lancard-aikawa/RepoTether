@@ -13,13 +13,15 @@
     errorText,
     isAncestorTag,
     moveTag,
+    placeTag,
     prefs,
     renameTag,
     savePrefs,
     toast,
+    toastUndo,
     type StateViewMode,
   } from "$lib/store.svelte";
-  import { depthOf, leafOf, MAX_DEPTH, parentOf, usageCount } from "$lib/tags";
+  import { depthOf, leafOf, MAX_DEPTH, parentOf, usageCount, type Placement } from "$lib/tags";
   import ProjectDetail from "./ProjectDetail.svelte";
   import ProjectRow from "./ProjectRow.svelte";
 
@@ -204,6 +206,8 @@
   type Drag = { kind: "project"; project: Project; from: string | null } | { kind: "tag"; tag: string };
   let dragging = $state<Drag | null>(null);
   let dropId = $state<string | null>(null);
+  /** タグを落とす位置: 見出しの上端 = 前、下端 = 後 (どちらも並べ替え)、真ん中 = 中 (下の階層へ) */
+  let dropPos = $state<Placement>("into");
 
   const tagOfNode = (id: string) => (id === UNTAGGED ? null : id);
 
@@ -227,6 +231,7 @@
   function endDrag() {
     dragging = null;
     dropId = null;
+    dropPos = "into";
   }
 
   // ドラッグ中に一覧の上端・下端へ近づけたら自動でスクロールする (遠くのタグへ運べるように)
@@ -253,21 +258,34 @@
 
   const isCopy = (e: DragEvent) => e.ctrlKey || e.altKey;
 
-  /** タグを n の下へ移せるか (自分自身・自分の下の階層・今の親には落とせない) */
-  function canDropTag(tag: string, n: TreeNode): boolean {
+  /** タグを n の前・後・中へ動かせるか (自分自身・自分の下の階層へは動かせない) */
+  function canDropTag(tag: string, n: TreeNode, pos: Placement): boolean {
     const target = tagOfNode(n.id);
-    if (target === null) return tag.includes("/"); // 一番上へ。既に一番上なら何もしない
-    return target !== tag && !isAncestorTag(tag, target) && target !== parentOf(tag);
+    if (target === null) return tag.includes("/"); // 「タグなし」へ = 一番上の階層の最後へ。既に一番上なら何もしない
+    if (target === tag || isAncestorTag(tag, target)) return false;
+    return pos !== "into" || target !== parentOf(tag); // 今の親の中へは、動かない
+  }
+
+  /** 見出しのどこにいるかで、前・後・中を決める */
+  function placementOf(e: DragEvent, li: HTMLElement): Placement {
+    const head = li.querySelector<HTMLElement>(":scope > .group-head");
+    if (!head) return "into";
+    const r = head.getBoundingClientRect();
+    if (e.clientY < r.top || e.clientY > r.bottom) return "into"; // 見出しより下 (中身の上) なら中へ
+    const rel = (e.clientY - r.top) / r.height;
+    return rel < 0.3 ? "before" : rel > 0.7 ? "after" : "into";
   }
 
   function overGroup(e: DragEvent, n: TreeNode) {
     if (!dragging) return;
     // 入れ子のグループでは一番内側だけが受ける
     e.stopPropagation();
-    if (dragging.kind === "tag" && !canDropTag(dragging.tag, n)) {
+    const pos = dragging.kind === "tag" && !n.special ? placementOf(e, e.currentTarget as HTMLElement) : "into";
+    if (dragging.kind === "tag" && !canDropTag(dragging.tag, n, pos)) {
       dropId = null;
       return;
     }
+    dropPos = pos;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = dragging.kind === "project" && isCopy(e) ? "copy" : "move";
     dropId = n.id;
@@ -279,25 +297,32 @@
     e.preventDefault();
     const d = dragging;
     const to = tagOfNode(n.id);
+    const pos = dropPos;
     endDrag();
     try {
       if (d.kind === "tag") {
-        if (!canDropTag(d.tag, n)) return;
-        const dest = to === null ? leafOf(d.tag) : `${to}/${leafOf(d.tag)}`;
-        await renameTag(d.tag, dest);
-        toast(`タグ「${d.tag}」を「${dest}」へ移しました`);
+        if (!canDropTag(d.tag, n, pos)) return;
+        if (to === null) {
+          const prev = await renameTag(d.tag, leafOf(d.tag));
+          toastUndo(`タグ「${d.tag}」を一番上の階層へ移しました`, prev);
+        } else {
+          const prev = await placeTag(d.tag, to, pos);
+          const where = pos === "into" ? `「${to}」の中` : `「${to}」の${pos === "before" ? "前" : "後"}`;
+          toastUndo(`タグ「${d.tag}」を${where}へ移しました`, prev);
+        }
         return;
       }
       const { project, from } = d;
       const copy = isCopy(e) && to !== null;
       const changed = await moveTag(project.prefKey, project.tags, from, to, copy);
       if (changed) {
-        toast(
+        toastUndo(
           to === null
             ? `${project.name} からタグ「${from}」を外しました`
             : copy || from === null
               ? `${project.name} にタグ「${to}」を付けました`
               : `${project.name} を「${from}」から「${to}」へ移しました`,
+          changed,
         );
       }
     } catch (err) {
@@ -342,15 +367,13 @@
     try {
       if (e.mode === "add") {
         const path = e.parent ? `${e.parent}/${name}` : name;
-        await createTag(path);
-        toast(`タグ「${path}」を作りました`);
+        toastUndo(`タグ「${path}」を作りました`, await createTag(path));
       } else {
         // 名前の変更は同じ階層のまま。"/" を含めれば別の階層へ移せる
         const parent = parentOf(e.tag);
         const dest = name.includes("/") ? name : parent ? `${parent}/${name}` : name;
         if (dest === e.tag) return cancelEdit();
-        await renameTag(e.tag, dest);
-        toast(`タグ「${e.tag}」を「${dest}」にしました`);
+        toastUndo(`タグ「${e.tag}」を「${dest}」にしました`, await renameTag(e.tag, dest));
       }
       editing = null;
     } catch (err) {
@@ -366,8 +389,7 @@
       (n ? `\n付いているプロジェクト ${n} 件は${parent ? `「${parent}」` : "「タグなし」"}へ移ります。` : "");
     if (!confirm(msg)) return;
     try {
-      await deleteTag(tag);
-      toast(`タグ「${tag}」を削除しました`);
+      toastUndo(`タグ「${tag}」を削除しました`, await deleteTag(tag));
     } catch (err) {
       toast(errorText(err));
     }
@@ -395,7 +417,9 @@
     {@const tagMode = prefs.stateView === "tag" && !c.special}
     <li
       class="group"
-      class:drop={dropId === c.id}
+      class:drop={dropId === c.id && dropPos === "into"}
+      class:drop-before={dropId === c.id && dropPos === "before"}
+      class:drop-after={dropId === c.id && dropPos === "after"}
       style="--depth: {depth}"
       ondragover={(e) => prefs.stateView === "tag" && overGroup(e, c)}
       ondrop={(e) => prefs.stateView === "tag" && dropOnGroup(e, c)}
@@ -561,7 +585,8 @@
           タグはまだありません。プロジェクトを選ぶと、右の詳細パネルで「仕事/客先/案件」のように / 区切りで 3 階層まで付けられます。
         {:else}
           行をタグへドラッグすると付け替え ({isMacLike ? "Option" : "Ctrl"} を押しながらだと元のタグも残す)、「タグなし」へ落とすと外せます。
-          タグの見出しもドラッグで別のタグの下へ移せます。見出しにカーソルを乗せると、下に追加・名前の変更・削除ができます。
+          タグの見出しもドラッグで動かせます。見出しの上端・下端に落とすと前・後へ並べ替え、真ん中に落とすとその中へ入ります。
+          見出しにカーソルを乗せると、下に追加・名前の変更・削除ができます。間違えたら、すぐ出る「元に戻す」で戻せます。
         {/if}
       </p>
     {/if}
@@ -864,6 +889,31 @@
 
   .group.drop > .sub {
     background: color-mix(in srgb, var(--accent) 5%, transparent);
+  }
+
+  /* 並べ替え: 前は見出しの上に、後はグループ全体の下に線を引く */
+  .group {
+    position: relative;
+  }
+
+  .group.drop-before::before,
+  .group.drop-after::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--accent);
+    z-index: 20;
+    pointer-events: none;
+  }
+
+  .group.drop-before::before {
+    top: -1px;
+  }
+
+  .group.drop-after::after {
+    bottom: -2px;
   }
 
   .none {

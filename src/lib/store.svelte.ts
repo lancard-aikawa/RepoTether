@@ -11,6 +11,8 @@ export const app = $state({
   progress: "",
   error: "",
   toast: "",
+  /** トーストに付けるボタン (元に戻す など) */
+  toastAction: null as { label: string; run: () => void } | null,
 });
 
 /** 画面の好み (その端末だけ)。失われても困らないものだけ置く */
@@ -60,10 +62,28 @@ export function savePrefs() {
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
-export function toast(msg: string) {
+export function toast(msg: string, action?: { label: string; run: () => void }) {
   app.toast = msg;
+  app.toastAction = action ?? null;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (app.toast = ""), 4000);
+  // ボタン付きは押す時間を見て長めに出す
+  toastTimer = setTimeout(() => ((app.toast = ""), (app.toastAction = null)), action ? 8000 : 4000);
+}
+
+/** 設定を prev に戻せるボタン付きのトースト (タグの操作の取り消し用) */
+export function toastUndo(msg: string, prev: Config | undefined) {
+  if (!prev) return toast(msg);
+  toast(msg, {
+    label: "元に戻す",
+    run: async () => {
+      try {
+        await updateConfig(prev);
+        toast("元に戻しました");
+      } catch (e) {
+        toast(errorText(e));
+      }
+    },
+  });
 }
 
 export function errorText(e: unknown): string {
@@ -107,13 +127,16 @@ export async function updateConfig(next: Config, opts: { refresh?: boolean; remo
 // タグの操作の本体は tags.ts。ここでは設定に反映するだけ
 export { isAncestorTag, normalizeTag, tidyTags } from "./tags";
 
-async function applyTags(change: (cfg: Config) => Config) {
+/** タグの操作を設定に反映する。取り消せるように、変更前の設定を返す */
+async function applyTags(change: (cfg: Config) => Config): Promise<Config | undefined> {
   if (!app.config) return;
+  const prev = JSON.parse(JSON.stringify(app.config)) as Config;
   await updateConfig(change(app.config));
+  return prev;
 }
 
 export async function setTags(key: string, tags: string[]) {
-  await applyTags((c) => tags_.setProjectTags(c, key, tags));
+  return applyTags((c) => tags_.setProjectTags(c, key, tags));
 }
 
 /**
@@ -126,7 +149,7 @@ export async function moveTag(
   from: string | null,
   to: string | null,
   copy: boolean,
-): Promise<boolean> {
+): Promise<Config | false | undefined> {
   if (from === to) return false;
   let next = [...current];
   if (from && !copy) next = next.filter((t) => t !== from);
@@ -134,8 +157,7 @@ export async function moveTag(
   next = tags_.tidyTags(next);
   const before = tags_.tidyTags(current);
   if (next.length === before.length && next.every((t) => before.includes(t))) return false;
-  await setTags(key, next);
-  return true;
+  return setTags(key, next);
 }
 
 /** 空のタグを作る */
@@ -144,8 +166,11 @@ export const createTag = (raw: string) => applyTags((c) => tags_.createTag(c, ra
 export const renameTag = (from: string, to: string) => applyTags((c) => tags_.renameTag(c, from, to));
 /** 削除。付いていたプロジェクトは親のタグへ */
 export const deleteTag = (path: string) => applyTags((c) => tags_.deleteTag(c, path));
+/** 別のタグの前・後 (並べ替え) か中 (下の階層へ) に動かす */
+export const placeTag = (tag: string, target: string, pos: tags_.Placement) =>
+  applyTags((c) => tags_.placeTag(c, tag, target, pos));
 
-/** 存在するタグすべて (候補の表示用) */
+/** 存在するタグすべて (自分で並べた順) */
 export function allTags(): string[] {
   return app.config ? tags_.definedTags(app.config) : [];
 }
