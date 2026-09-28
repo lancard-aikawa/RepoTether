@@ -4,11 +4,13 @@
   import type { RemoteKind } from "$lib/remotes";
   import { relative } from "$lib/format";
   import { folderTree, tagTree, type TreeNode } from "$lib/tree";
-  import { prefs, savePrefs, type StateViewMode } from "$lib/store.svelte";
+  import { errorText, moveTag, prefs, savePrefs, toast, type StateViewMode } from "$lib/store.svelte";
   import ProjectDetail from "./ProjectDetail.svelte";
   import ProjectRow from "./ProjectRow.svelte";
 
   let { projects, now }: { projects: Project[]; now: number } = $props();
+
+  const isMacLike = typeof navigator !== "undefined" && /Mac/.test(navigator.userAgent);
 
   type Filter = "all" | "leftovers" | "remote" | "error" | "folder";
   type Sort = "recent" | "stale" | "weight" | "name";
@@ -159,6 +161,83 @@
     savePrefs();
   }
 
+  // ---- タグ表示のドラッグ ----
+  const UNTAGGED = "#untagged";
+  let dragging = $state<{ project: Project; from: string | null } | null>(null);
+  let dropId = $state<string | null>(null);
+
+  const tagOfNode = (id: string) => (id === UNTAGGED ? null : id);
+
+  function startDrag(e: DragEvent, p: Project, nodeId: string) {
+    dragging = { project: p, from: tagOfNode(nodeId) };
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "copyMove";
+      e.dataTransfer.setData("text/plain", p.name);
+    }
+  }
+
+  function endDrag() {
+    dragging = null;
+    dropId = null;
+  }
+
+  // ドラッグ中に一覧の上端・下端へ近づけたら自動でスクロールする (遠くのタグへ運べるように)
+  let listEl = $state<HTMLUListElement | null>(null);
+  $effect(() => {
+    if (!dragging || !listEl) return;
+    const el = listEl;
+    let speed = 0;
+    const EDGE = 60;
+    const onOver = (e: DragEvent) => {
+      const r = el.getBoundingClientRect();
+      if (e.clientY < r.top + EDGE) speed = -Math.ceil((r.top + EDGE - e.clientY) / 2);
+      else if (e.clientY > r.bottom - EDGE) speed = Math.ceil((e.clientY - (r.bottom - EDGE)) / 2);
+      else speed = 0;
+    };
+    const timer = setInterval(() => speed && el.scrollBy(0, speed), 16);
+    // グループ側で伝播を止めるので、捕捉段階で拾う
+    document.addEventListener("dragover", onOver, true);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("dragover", onOver, true);
+    };
+  });
+
+  const isCopy = (e: DragEvent) => e.ctrlKey || e.altKey;
+
+  function overGroup(e: DragEvent, n: TreeNode) {
+    if (!dragging) return;
+    // 入れ子のグループでは一番内側だけが受ける
+    e.stopPropagation();
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = isCopy(e) ? "copy" : "move";
+    dropId = n.id;
+  }
+
+  async function dropOnGroup(e: DragEvent, n: TreeNode) {
+    if (!dragging) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const { project, from } = dragging;
+    const to = tagOfNode(n.id);
+    const copy = isCopy(e) && to !== null;
+    endDrag();
+    try {
+      const changed = await moveTag(project.prefKey, project.tags, from, to, copy);
+      if (changed) {
+        toast(
+          to === null
+            ? `${project.name} からタグ「${from}」を外しました`
+            : copy || from === null
+              ? `${project.name} にタグ「${to}」を付けました`
+              : `${project.name} を「${from}」から「${to}」へ移しました`,
+        );
+      }
+    } catch (err) {
+      toast(errorText(err));
+    }
+  }
+
   function select(p: Project) {
     selectedKey = p.key === selectedKey ? null : p.key;
   }
@@ -167,7 +246,13 @@
 {#snippet branch(n: TreeNode, depth: number)}
   {#each n.children as c (c.id)}
     {@const open = !collapsed.has(cKey(c))}
-    <li class="group" style="--depth: {depth}">
+    <li
+      class="group"
+      class:drop={dropId === c.id}
+      style="--depth: {depth}"
+      ondragover={(e) => prefs.stateView === "tag" && overGroup(e, c)}
+      ondrop={(e) => prefs.stateView === "tag" && dropOnGroup(e, c)}
+    >
       <button class="group-head" class:special={c.special} aria-expanded={open} onclick={() => toggle(c)}>
         <svg class="chev" class:open viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
         <span class="g-label">{c.label}</span>
@@ -185,6 +270,8 @@
               selected={p.key === selectedKey}
               onselect={() => select(p)}
               showTags={prefs.stateView !== "tag"}
+              ondragstart={prefs.stateView === "tag" ? (e) => startDrag(e, p, c.id) : undefined}
+              ondragend={endDrag}
             />
           {/each}
         </ul>
@@ -245,13 +332,17 @@
       </div>
     </div>
 
-    {#if prefs.stateView === "tag" && !hasAnyTag}
+    {#if prefs.stateView === "tag"}
       <p class="hint muted">
-        タグはまだありません。プロジェクトを選ぶと、右の詳細パネルで「仕事/客先/案件」のように / 区切りで 3 階層まで付けられます。
+        {#if !hasAnyTag}
+          タグはまだありません。プロジェクトを選ぶと、右の詳細パネルで「仕事/客先/案件」のように / 区切りで 3 階層まで付けられます。
+        {:else}
+          行をタグの見出し (または中) へドラッグすると移せます。{isMacLike ? "Option" : "Ctrl"} を押しながらだと元のタグも残し、「タグなし」へ落とすとタグを外します。
+        {/if}
       </p>
     {/if}
 
-    <ul class="list">
+    <ul class="list" bind:this={listEl}>
       {#if tree}
         {@render branch(tree, 0)}
         {#if !tree.children.length}<li class="none muted">該当するプロジェクトはありません</li>{/if}
@@ -388,6 +479,16 @@
     margin-left: auto;
     font-size: 12px;
     white-space: nowrap;
+  }
+
+  /* ドラッグ中の落とし先 */
+  .group.drop > .group-head {
+    background: var(--accent-wash);
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+
+  .group.drop > .sub {
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
   }
 
   .none {

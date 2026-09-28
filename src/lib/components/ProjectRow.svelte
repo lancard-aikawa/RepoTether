@@ -11,6 +11,8 @@
     selected,
     onselect,
     showTags = true,
+    ondragstart,
+    ondragend,
   }: {
     project: Project;
     now: number;
@@ -18,6 +20,9 @@
     onselect: () => void;
     /** タグ表示ではタグ自体が見出しになるので出さない */
     showTags?: boolean;
+    /** 渡されたときだけドラッグできる (タグ表示) */
+    ondragstart?: (e: DragEvent) => void;
+    ondragend?: () => void;
   } = $props();
 
   function sessionLine(p: Project): string | null {
@@ -38,7 +43,14 @@
   }
 </script>
 
-<li class:selected class:hidden={p.hidden}>
+<li
+  class:selected
+  class:hidden={p.hidden}
+  class:draggable={!!ondragstart}
+  draggable={ondragstart ? "true" : undefined}
+  {ondragstart}
+  {ondragend}
+>
   <div
     class="row"
     role="button"
@@ -91,6 +103,10 @@
 
   li.selected {
     background: var(--accent-wash);
+  }
+
+  li.draggable .row {
+    cursor: grab;
   }
 
   li.hidden .row {

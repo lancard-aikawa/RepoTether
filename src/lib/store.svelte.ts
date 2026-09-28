@@ -110,6 +110,26 @@ export async function setTags(key: string, tags: string[]) {
   await updateConfig({ ...app.config, tags: next });
 }
 
+/**
+ * タグ表示のドラッグ: from のタグから to のタグへ移す。copy なら from を残す。
+ * from / to が null は「タグなし」。何も変わらなければ false
+ */
+export async function moveTag(
+  key: string,
+  current: string[],
+  from: string | null,
+  to: string | null,
+  copy: boolean,
+): Promise<boolean> {
+  if (from === to) return false;
+  let next = [...current];
+  if (from && !copy) next = next.filter((t) => t !== from);
+  if (to && !next.includes(to)) next.push(to);
+  if (next.length === current.length && next.every((t, i) => t === current[i])) return false;
+  await setTags(key, next);
+  return true;
+}
+
 /** 使われているタグすべて (候補の表示用) */
 export function allTags(): string[] {
   const set = new Set<string>();
