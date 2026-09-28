@@ -16,7 +16,11 @@ export const secretStoreApp = isMac ? "キーチェーンアクセス" : secretS
 
 /** gh でログインしているアカウント名。ログインしていなければ理由を投げる */
 export async function checkGh(baseUrl: string): Promise<string> {
-  if (!inTauri) throw new Error("ブラウザ表示では確認できません");
+  if (!inTauri) {
+    const user = hooks().__mockGhUser;
+    if (user) return user;
+    throw new Error("ブラウザ表示では確認できません");
+  }
   return call("check_gh", { baseUrl });
 }
 
@@ -45,8 +49,21 @@ const mockConfig: Config = {
   starred: [],
 };
 
+/** ブラウザ表示の確認用に、外から差し込める値 (tools/manual-shots.mjs がマニュアルの画面を撮るときに使う) */
+type MockHooks = {
+  __mockConfig?: Config;
+  __mockReadme?: Record<string, string>;
+  __noReadme?: string[];
+  __mockGhUser?: string;
+};
+const hooks = () => (typeof window === "undefined" ? {} : (window as unknown as MockHooks));
+
 export async function getConfig(): Promise<Config> {
-  if (!inTauri) return structuredClone(mockConfig);
+  if (!inTauri) {
+    const injected = hooks().__mockConfig;
+    if (injected) Object.assign(mockConfig, structuredClone(injected));
+    return structuredClone(mockConfig);
+  }
   return call("get_config");
 }
 
@@ -179,9 +196,10 @@ export interface Readme {
 export async function readReadme(path: string): Promise<Readme | null> {
   if (!inTauri) {
     // ブラウザ表示ではファイルを読めないので、無害化の確認を兼ねた見本を返す。
-    // 画面の確認用に window.__noReadme に入れたパスは「README なし」にする
-    const none = (window as unknown as { __noReadme?: string[] }).__noReadme;
-    if (none?.includes(path)) return null;
+    // 画面の確認用に window.__noReadme に入れたパスは「README なし」、__mockReadme にあればその中身にする
+    if (hooks().__noReadme?.includes(path)) return null;
+    const given = hooks().__mockReadme;
+    if (given) return given[path] ? { name: "README.md", content: given[path], markdown: true, truncated: false } : null;
     return {
       name: "README.md (ブラウザ表示の見本)",
       markdown: true,

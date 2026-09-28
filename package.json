@@ -11,7 +11,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "tauri": "tauri",
-    "test": "node --test \"tests/*.test.mts\""
+    "test": "node --test \"tests/*.test.mts\"",
+    "manual-shots": "node tools/manual-shots.mjs"
   },
   "license": "MIT",
   "dependencies": {
@@ -26,6 +27,7 @@
     "@sveltejs/kit": "^2.65.1",
     "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tauri-apps/cli": "^2",
+    "playwright-core": "1.63.0",
     "svelte": "^5.56.3",
     "svelte-check": "^4.6.0",
     "typescript": "~6.0.3",
