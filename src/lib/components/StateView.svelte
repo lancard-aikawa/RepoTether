@@ -157,6 +157,16 @@
     savePrefs();
   }
 
+  /** 既定以外の絞り込みをしているか (検索も含む) */
+  const filtering = $derived(filter !== "all" || remoteFilter !== "" || visibility !== "shown" || query.trim() !== "");
+
+  function clearFilters() {
+    filter = "all";
+    remoteFilter = "";
+    visibility = "shown";
+    query = "";
+  }
+
   function setView(v: StateViewMode) {
     prefs.stateView = v;
     savePrefs();
@@ -284,52 +294,73 @@
 <div class="layout">
   <section class="list-pane">
     <div class="bar">
-      <div class="toolbar">
-        <input type="search" placeholder="名前・パス・タグで絞り込み" bind:value={query} />
-        <div class="segmented" role="group" aria-label="表示形式">
-          {#each views as v (v.id)}
-            <button class:on={prefs.stateView === v.id} onclick={() => setView(v.id)}>{v.label}</button>
-          {/each}
+      <!-- 1 行目: 検索と件数 -->
+      <div class="bar-row">
+        <span class="caption">検索</span>
+        <div class="controls">
+          <input class="search" type="search" placeholder="名前・パス・タグで検索" bind:value={query} aria-label="検索" />
+          <span class="result muted num">{shown.length} / {projects.length} 件</span>
         </div>
-        <label class="inline">
-          <span class="muted">並び</span>
-          <select bind:value={sort}>
-            <option value="recent">最近の作業順</option>
-            <option value="stale">取り残し・放置が長い順</option>
-            <option value="weight">取り残しが重い順</option>
-            <option value="name">名前順</option>
-          </select>
-        </label>
-        {#if tree}
-          <button class="ghost" onclick={() => setAll(true)}>すべて開く</button>
-          <button class="ghost" onclick={() => setAll(false)}>すべて畳む</button>
-        {/if}
       </div>
-      <div class="toolbar">
-        <div class="segmented" role="group" aria-label="状態で絞り込み">
-          {#each filters as f (f.id)}
-            <button class:on={filter === f.id} onclick={() => (filter = f.id)}
-              >{f.label} <span class="muted num">{counts[f.id]}</span></button
-            >
-          {/each}
-        </div>
-        <label class="inline">
-          <span class="muted">リモート</span>
-          <select bind:value={remoteFilter}>
-            <option value="">すべて</option>
-            {#each remoteOptions as o (o.id)}
-              <option value={o.id}>{o.label} ({o.count})</option>
+
+      <!-- 2 行目: 見え方 (表示形式と並び替え) -->
+      <div class="bar-row">
+        <span class="caption">表示</span>
+        <div class="controls">
+          <div class="segmented" role="group" aria-label="表示形式">
+            {#each views as v (v.id)}
+              <button class:on={prefs.stateView === v.id} onclick={() => setView(v.id)}>{v.label}</button>
             {/each}
-          </select>
-        </label>
-        <label class="inline">
-          <span class="muted">表示</span>
-          <select bind:value={visibility}>
-            <option value="shown">表示中</option>
-            <option value="hidden">非表示 ({hiddenCount})</option>
-            <option value="all">すべて</option>
-          </select>
-        </label>
+          </div>
+          <label class="field">
+            <span class="muted">並び</span>
+            <select bind:value={sort}>
+              <option value="recent">最近の作業順</option>
+              <option value="stale">取り残し・放置が長い順</option>
+              <option value="weight">取り残しが重い順</option>
+              <option value="name">名前順</option>
+            </select>
+          </label>
+          {#if tree}
+            <span class="spacer"></span>
+            <button class="ghost small" onclick={() => setAll(true)}>すべて開く</button>
+            <button class="ghost small" onclick={() => setAll(false)}>すべて畳む</button>
+          {/if}
+        </div>
+      </div>
+
+      <!-- 3 行目: 絞り込み (対象を減らすものはすべてここ) -->
+      <div class="bar-row">
+        <span class="caption">絞り込み</span>
+        <div class="controls">
+          <div class="segmented" role="group" aria-label="状態で絞り込み">
+            {#each filters as f (f.id)}
+              <button class:on={filter === f.id} onclick={() => (filter = f.id)}
+                >{f.label} <span class="muted num">{counts[f.id]}</span></button
+              >
+            {/each}
+          </div>
+          <label class="field">
+            <span class="muted">リモート</span>
+            <select bind:value={remoteFilter} class:active={remoteFilter !== ""}>
+              <option value="">すべて</option>
+              {#each remoteOptions as o (o.id)}
+                <option value={o.id}>{o.label} ({o.count})</option>
+              {/each}
+            </select>
+          </label>
+          <label class="field">
+            <span class="muted">非表示</span>
+            <select bind:value={visibility} class:active={visibility !== "shown"}>
+              <option value="shown">除く</option>
+              <option value="hidden">だけ ({hiddenCount})</option>
+              <option value="all">含める</option>
+            </select>
+          </label>
+          {#if filtering}
+            <button class="ghost small" onclick={clearFilters}>条件を解除</button>
+          {/if}
+        </div>
       </div>
     </div>
 
@@ -382,16 +413,65 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+    background: var(--surface);
   }
 
-  .bar input[type="search"] {
-    width: 220px;
+  .bar-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
   }
 
-  .inline {
+  /* 見出しの右側。折り返しても見出しの下にはみ出さない */
+  .controls {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+    min-height: 28px;
+  }
+
+  /* 行の見出し。幅をそろえて、表示と絞り込みの操作の頭を縦に並べる */
+  .caption {
+    width: 56px;
+    flex: none;
+    line-height: 28px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-2);
+  }
+
+  .search {
+    width: 320px;
+    max-width: 100%;
+  }
+
+  .result {
+    margin-left: auto;
+    font-size: 12px;
+  }
+
+  .field {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+
+  /* 既定から変えている絞り込みは枠を強調する */
+  select.active {
+    border-color: var(--accent);
+    background: var(--accent-wash);
+  }
+
+  .spacer {
+    flex: 1;
+  }
+
+  .small {
+    font-size: 12px;
+    padding: 2px 8px;
   }
 
   .hint {
