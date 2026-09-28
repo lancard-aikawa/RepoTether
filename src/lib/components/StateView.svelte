@@ -4,6 +4,7 @@
   import { relative } from "$lib/format";
   import ProjectActions from "./ProjectActions.svelte";
   import ProjectDetail from "./ProjectDetail.svelte";
+  import RemoteBadges from "./RemoteBadges.svelte";
 
   let { projects, now }: { projects: Project[]; now: number } = $props();
 
@@ -52,7 +53,8 @@
         (p) =>
           p.name.toLowerCase().includes(q) ||
           (p.path ?? "").toLowerCase().includes(q) ||
-          p.remotes.some((r) => r.fullName.toLowerCase().includes(q)),
+          p.remotes.some((r) => r.fullName.toLowerCase().includes(q)) ||
+          p.links.some((l) => l.label.toLowerCase().includes(q) || l.url.toLowerCase().includes(q)),
       );
     }
     const byRecent = (a: Project, b: Project) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0);
@@ -123,7 +125,7 @@
           >
             <div class="line1">
               <span class="name">{p.name}</span>
-              {#each p.hosts as h (h)}<span class="host">{h}</span>{/each}
+              <RemoteBadges links={p.links} showNone={p.kind === "local" && !p.local?.error} />
               {#if kindLabel(p)}<span class="host">{kindLabel(p)}</span>{/if}
               {#if p.local?.branch && p.local.branch !== p.local.defaultBranch}
                 <span class="branch mono">{p.local.branch}</span>
@@ -228,8 +230,9 @@
 
   .line1 {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
+    align-items: center;
+    gap: 6px 8px;
+    flex-wrap: wrap;
     min-width: 0;
   }
 

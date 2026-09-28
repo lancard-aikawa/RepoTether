@@ -7,6 +7,7 @@
 
 import type { Commit, Config, LocalRepo, RemoteRepo, Session, Snapshot } from "./types";
 import { dayKey, toMs } from "./format";
+import { linkOfRemote, linksOfLocal, type RemoteLink } from "./remotes";
 
 export type ProjectKind = "local" | "remote" | "folder";
 export type Severity = "high" | "mid" | "low" | "info";
@@ -25,8 +26,8 @@ export interface Project {
   path: string | null;
   local: LocalRepo | null;
   remotes: RemoteRepo[];
-  /** リモートのホスト名 (github.com など) */
-  hosts: string[];
+  /** リモート (GitHub / Gogs などの種類と、ブラウザで開く URL)。無ければ空 */
+  links: RemoteLink[];
   sessions: Session[];
   commits: Commit[];
   myCommits: Commit[];
@@ -79,7 +80,6 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
         matchedRemote.add(r.key);
       }
     }
-    const hosts = unique(repo.remotes.map((r) => r.key?.split("/")[0]).filter(isString));
     const commits = commitsByRepo.get(repo.id) ?? [];
     const sessions = sortSessions(sessionsByRepo.get(repo.id) ?? []);
     projects.push(
@@ -91,7 +91,7 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           path: repo.path,
           local: repo,
           remotes,
-          hosts,
+          links: linksOfLocal(repo, remotes, cfg),
           sessions,
           commits,
           myCommits: commits.filter((c) => isMine(c.authorEmail, cfg)),
@@ -116,7 +116,7 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           path: null,
           local: null,
           remotes: [r],
-          hosts: [r.key.split("/")[0]],
+          links: [linkOfRemote(r, cfg)],
           sessions: [],
           commits: [],
           myCommits: [],
@@ -146,7 +146,7 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           path,
           local: null,
           remotes: [],
-          hosts: [],
+          links: [],
           sessions: sortSessions(sessions),
           commits: [],
           myCommits: [],
@@ -208,9 +208,8 @@ export function leftoversOf(p: Project): Leftover[] {
     out.push({ kind: "dirty", label: `未コミット ${dirty}`, severity: "mid", detail: parts.join(" / ") });
   }
   if (r.ahead > 0) out.push({ kind: "ahead", label: `未 push ${r.ahead}`, severity: "high" });
-  if (r.remotes.length === 0) {
-    out.push({ kind: "noRemote", label: "リモートなし", severity: "low" });
-  } else if (!r.upstream && r.branch) {
+  // リモートが無いことは、リモートの欄に「なし」と出すので取り残しには入れない
+  if (r.remotes.length > 0 && !r.upstream && r.branch) {
     out.push({
       kind: "noUpstream",
       label: "upstream 未設定",
@@ -249,7 +248,7 @@ export function leftoversOf(p: Project): Leftover[] {
 }
 
 /** 取り残しに数えないもの。読めないリポジトリは「読めない」で別に絞り込む */
-const NOT_LEFTOVER = new Set(["noRemote", "noUpstream", "dubious", "error"]);
+const NOT_LEFTOVER = new Set(["noUpstream", "dubious", "error"]);
 
 /** 「取り残し」とみなすもの (情報だけのものは除く) */
 export function hasLeftovers(p: Project): boolean {
@@ -377,10 +376,6 @@ export function groupBy<T, K>(xs: T[], f: (x: T) => K): Map<K, T[]> {
 
 function sortSessions(xs: Session[]): Session[] {
   return [...xs].sort((a, b) => (toMs(b.endedAt) ?? 0) - (toMs(a.endedAt) ?? 0));
-}
-
-function unique<T>(xs: T[]): T[] {
-  return [...new Set(xs)];
 }
 
 function isString(x: unknown): x is string {

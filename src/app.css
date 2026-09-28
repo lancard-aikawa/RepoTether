@@ -27,6 +27,13 @@
   --heat-3: #2a78d6;
   --heat-4: #184f95;
 
+  /* リモートの種類 (アイコンと地の色) */
+  --rk-github: #24292f;
+  --rk-gogs: #eb6834;
+  --rk-gitea: #1baf7a;
+  --rk-gitlab: #e87ba4;
+  --rk-backlog: #008300;
+
   --radius: 6px;
   --font: "Segoe UI", "Yu Gothic UI", "Meiryo UI", -apple-system, "Hiragino Sans", system-ui, sans-serif;
   --mono: "Cascadia Mono", Consolas, "BIZ UDGothic", ui-monospace, Menlo, monospace;
@@ -53,6 +60,11 @@
     --heat-2: #256abf;
     --heat-3: #3987e5;
     --heat-4: #86b6ef;
+    --rk-github: #d1d7e0;
+    --rk-gogs: #d95926;
+    --rk-gitea: #199e70;
+    --rk-gitlab: #d55181;
+    --rk-backlog: #2ea043;
   }
 }
 
@@ -76,6 +88,11 @@
   --heat-2: #256abf;
   --heat-3: #3987e5;
   --heat-4: #86b6ef;
+  --rk-github: #d1d7e0;
+  --rk-gogs: #d95926;
+  --rk-gitea: #199e70;
+  --rk-gitlab: #d55181;
+  --rk-backlog: #2ea043;
 }
 
 * {

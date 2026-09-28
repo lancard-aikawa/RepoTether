@@ -4,6 +4,7 @@
   import * as api from "$lib/api";
   import { errorText, refresh, setHidden, toast } from "$lib/store.svelte";
   import ProjectActions from "./ProjectActions.svelte";
+  import RemoteBadges from "./RemoteBadges.svelte";
 
   let { project, now, onclose }: { project: Project; now: number; onclose: () => void } = $props();
 
@@ -125,23 +126,21 @@
       </section>
     {/if}
 
-    {#if r?.remotes.length || project.remotes.length}
+    {#if project.kind !== "folder"}
       <section>
         <h3>リモート</h3>
-        <ul class="plain">
-          {#each r?.remotes ?? [] as rm (rm.name)}
-            <li class="mono small"><span class="muted">{rm.name}</span> {rm.url}</li>
-          {/each}
-          {#each project.remotes as rr (rr.key)}
-            <li class="small">
-              {rr.fullName}
-              {#if rr.private}<span class="muted">(非公開)</span>{/if}
-              {#if rr.archived}<span class="muted">(アーカイブ)</span>{/if}
-              {#if rr.pushedAt || rr.updatedAt}<span class="muted"> 最終 push {when(rr.pushedAt ?? rr.updatedAt)}</span
-                >{/if}
-            </li>
-          {/each}
-        </ul>
+        <div class="remotes">
+          <RemoteBadges links={project.links} showUrl />
+        </div>
+        {#each project.remotes as rr (rr.key)}
+          <p class="small muted">
+            {rr.fullName}
+            {#if rr.private}(非公開){/if}
+            {#if rr.archived}(アーカイブ){/if}
+            {#if rr.pushedAt || rr.updatedAt}/ 最終 push {when(rr.pushedAt ?? rr.updatedAt)}{/if}
+            {#if rr.description}<br />{rr.description}{/if}
+          </p>
+        {/each}
       </section>
     {/if}
 
@@ -339,6 +338,18 @@
     border: 1px solid var(--line-strong);
     border-radius: 4px;
     padding: 0 5px;
+  }
+
+  .remotes {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .remotes :global(.remote) {
+    max-width: 100%;
   }
 
   .reply {
