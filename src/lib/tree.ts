@@ -110,7 +110,8 @@ export function tagTree(projects: Project[], sortProjects: (xs: Project[]) => Pr
       untagged.projects.push(p);
       continue;
     }
-    for (const t of p.tags) {
+    // 上の階層のタグは、下の階層のタグがあれば飛ばす (同じプロジェクトが親子の両方に出ないように)
+    for (const t of p.tags.filter((t) => !p.tags.some((u) => u.startsWith(t + "/")))) {
       let cur = root;
       let id = "";
       for (const s of t.split("/").slice(0, 3)) {

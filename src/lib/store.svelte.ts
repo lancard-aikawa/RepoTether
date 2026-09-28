@@ -105,10 +105,24 @@ export function normalizeTag(raw: string): string | null {
   return parts.join("/");
 }
 
+/** a が b の上の階層か ("自作" と "自作/アプリ") */
+export function isAncestorTag(a: string, b: string): boolean {
+  return b.startsWith(a + "/");
+}
+
+/**
+ * タグの組を整える。重複を除き、下の階層のタグがあるときは上の階層のタグを落とす
+ * ("自作" と "自作/アプリ" なら "自作/アプリ" だけ。下の階層のタグが上の階層も表しているので)
+ */
+export function tidyTags(tags: string[]): string[] {
+  const uniq = [...new Set(tags)];
+  return uniq.filter((t) => !uniq.some((u) => isAncestorTag(t, u)));
+}
+
 export async function setTags(key: string, tags: string[]) {
   if (!app.config) return;
   const next = { ...(app.config.tags ?? {}) };
-  const uniq = [...new Set(tags)];
+  const uniq = tidyTags(tags);
   if (uniq.length) next[key] = uniq;
   else delete next[key];
   await updateConfig({ ...app.config, tags: next });
@@ -129,7 +143,9 @@ export async function moveTag(
   let next = [...current];
   if (from && !copy) next = next.filter((t) => t !== from);
   if (to && !next.includes(to)) next.push(to);
-  if (next.length === current.length && next.every((t, i) => t === current[i])) return false;
+  next = tidyTags(next);
+  const before = tidyTags(current);
+  if (next.length === before.length && next.every((t) => before.includes(t))) return false;
   await setTags(key, next);
   return true;
 }

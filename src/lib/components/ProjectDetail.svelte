@@ -4,6 +4,7 @@
   import * as api from "$lib/api";
   import {
     allTags,
+    isAncestorTag,
     errorText,
     normalizeTag,
     prefs,
@@ -32,9 +33,20 @@
       return;
     }
     tagError = "";
+    if (project.tags.includes(t)) {
+      tagError = `「${t}」はもう付いています`;
+      return;
+    }
+    const child = project.tags.find((x) => isAncestorTag(t, x));
+    if (child) {
+      tagError = `「${t}」は「${child}」に含まれるので追加しません`;
+      return;
+    }
+    const replaced = project.tags.filter((x) => isAncestorTag(x, t));
     try {
       await setTags(project.prefKey, [...project.tags, t]);
       newTag = "";
+      if (replaced.length) toast(`「${replaced.join("」「")}」を「${t}」に置き換えました`);
     } catch (e) {
       toast(errorText(e));
     }
