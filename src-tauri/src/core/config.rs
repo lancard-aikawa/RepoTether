@@ -26,6 +26,8 @@ pub struct Config {
     pub hidden: Vec<String>,
     /// プロジェクトに付けたタグ。キーは hidden と同じ。タグは "仕事/客先/案件" のように / で 3 階層まで
     pub tags: BTreeMap<String, Vec<String>>,
+    /// 作ったタグの一覧。プロジェクトが付いていなくても、削除するまで残す
+    pub tag_defs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -85,6 +87,7 @@ impl Default for Config {
             clone_root: None,
             hidden: vec![],
             tags: BTreeMap::new(),
+            tag_defs: vec![],
         }
     }
 }

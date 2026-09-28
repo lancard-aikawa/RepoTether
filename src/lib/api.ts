@@ -35,6 +35,7 @@ const mockConfig: Config = {
   cloneRoot: null,
   hidden: [],
   tags: {},
+  tagDefs: [],
 };
 
 export async function getConfig(): Promise<Config> {

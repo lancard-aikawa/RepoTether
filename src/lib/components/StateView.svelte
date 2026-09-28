@@ -4,7 +4,21 @@
   import type { RemoteKind } from "$lib/remotes";
   import { relative, searchKey } from "$lib/format";
   import { folderTree, tagTree, type TreeNode } from "$lib/tree";
-  import { errorText, moveTag, prefs, savePrefs, toast, type StateViewMode } from "$lib/store.svelte";
+  import {
+    allTags,
+    app,
+    createTag,
+    deleteTag,
+    errorText,
+    isAncestorTag,
+    moveTag,
+    prefs,
+    renameTag,
+    savePrefs,
+    toast,
+    type StateViewMode,
+  } from "$lib/store.svelte";
+  import { depthOf, leafOf, MAX_DEPTH, parentOf, usageCount } from "$lib/tags";
   import ProjectDetail from "./ProjectDetail.svelte";
   import ProjectRow from "./ProjectRow.svelte";
 
@@ -125,15 +139,19 @@
     return xs;
   });
 
+  /** 既定以外の絞り込みをしているか (検索も含む) */
+  const filtering = $derived(filter !== "all" || remoteFilter !== "" || visibility !== "shown" || query.trim() !== "");
+
   const flat = $derived(prefs.stateView === "time" ? sortProjects(shown) : []);
   const tree = $derived(
     prefs.stateView === "folder"
       ? folderTree(shown, sortProjects)
       : prefs.stateView === "tag"
-        ? tagTree(shown, sortProjects)
+        ? tagTree(shown, sortProjects, filtering ? [] : allTags())
         : null,
   );
-  const hasAnyTag = $derived(projects.some((p) => p.tags.length));
+  // 作っただけで、まだどのプロジェクトにも付けていないタグも数える
+  const hasAnyTag = $derived(allTags().length > 0);
 
   const selected = $derived(projects.find((p) => p.key === selectedKey) ?? null);
 
@@ -157,9 +175,6 @@
     savePrefs();
   }
 
-  /** 既定以外の絞り込みをしているか (検索も含む) */
-  const filtering = $derived(filter !== "all" || remoteFilter !== "" || visibility !== "shown" || query.trim() !== "");
-
   function clearFilters() {
     filter = "all";
     remoteFilter = "";
@@ -172,18 +187,28 @@
     savePrefs();
   }
 
-  // ---- タグ表示のドラッグ ----
+  // ---- タグ表示のドラッグ (プロジェクトの付け替えと、タグ自体の移動) ----
   const UNTAGGED = "#untagged";
-  let dragging = $state<{ project: Project; from: string | null } | null>(null);
+  type Drag = { kind: "project"; project: Project; from: string | null } | { kind: "tag"; tag: string };
+  let dragging = $state<Drag | null>(null);
   let dropId = $state<string | null>(null);
 
   const tagOfNode = (id: string) => (id === UNTAGGED ? null : id);
 
   function startDrag(e: DragEvent, p: Project, nodeId: string) {
-    dragging = { project: p, from: tagOfNode(nodeId) };
+    dragging = { kind: "project", project: p, from: tagOfNode(nodeId) };
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = "copyMove";
       e.dataTransfer.setData("text/plain", p.name);
+    }
+  }
+
+  function startTagDrag(e: DragEvent, n: TreeNode) {
+    e.stopPropagation();
+    dragging = { kind: "tag", tag: n.id };
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", n.id);
     }
   }
 
@@ -216,12 +241,23 @@
 
   const isCopy = (e: DragEvent) => e.ctrlKey || e.altKey;
 
+  /** タグを n の下へ移せるか (自分自身・自分の下の階層・今の親には落とせない) */
+  function canDropTag(tag: string, n: TreeNode): boolean {
+    const target = tagOfNode(n.id);
+    if (target === null) return tag.includes("/"); // 一番上へ。既に一番上なら何もしない
+    return target !== tag && !isAncestorTag(tag, target) && target !== parentOf(tag);
+  }
+
   function overGroup(e: DragEvent, n: TreeNode) {
     if (!dragging) return;
     // 入れ子のグループでは一番内側だけが受ける
     e.stopPropagation();
+    if (dragging.kind === "tag" && !canDropTag(dragging.tag, n)) {
+      dropId = null;
+      return;
+    }
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = isCopy(e) ? "copy" : "move";
+    if (e.dataTransfer) e.dataTransfer.dropEffect = dragging.kind === "project" && isCopy(e) ? "copy" : "move";
     dropId = n.id;
   }
 
@@ -229,11 +265,19 @@
     if (!dragging) return;
     e.stopPropagation();
     e.preventDefault();
-    const { project, from } = dragging;
+    const d = dragging;
     const to = tagOfNode(n.id);
-    const copy = isCopy(e) && to !== null;
     endDrag();
     try {
+      if (d.kind === "tag") {
+        if (!canDropTag(d.tag, n)) return;
+        const dest = to === null ? leafOf(d.tag) : `${to}/${leafOf(d.tag)}`;
+        await renameTag(d.tag, dest);
+        toast(`タグ「${d.tag}」を「${dest}」へ移しました`);
+        return;
+      }
+      const { project, from } = d;
+      const copy = isCopy(e) && to !== null;
       const changed = await moveTag(project.prefKey, project.tags, from, to, copy);
       if (changed) {
         toast(
@@ -249,6 +293,79 @@
     }
   }
 
+  // ---- タグの追加・名前の変更・削除 (タグ表示の見出しで) ----
+  /** 編集中のもの。add の parent が null なら一番上 */
+  type Edit = { mode: "add"; parent: string | null } | { mode: "rename"; tag: string };
+  let editing = $state<Edit | null>(null);
+  let editValue = $state("");
+  let editError = $state("");
+
+  function startAdd(parent: string | null) {
+    editing = { mode: "add", parent };
+    editValue = "";
+    editError = "";
+    // 子を足すなら、見えるように親を開く
+    if (parent) {
+      prefs.collapsed = prefs.collapsed.filter((k) => k !== `tag:${parent}`);
+      savePrefs();
+    }
+  }
+
+  function startRename(tag: string) {
+    editing = { mode: "rename", tag };
+    editValue = leafOf(tag);
+    editError = "";
+  }
+
+  function cancelEdit() {
+    editing = null;
+    editError = "";
+  }
+
+  async function commitEdit() {
+    const e = editing;
+    if (!e) return;
+    const name = editValue.trim();
+    if (!name) return cancelEdit();
+    try {
+      if (e.mode === "add") {
+        const path = e.parent ? `${e.parent}/${name}` : name;
+        await createTag(path);
+        toast(`タグ「${path}」を作りました`);
+      } else {
+        // 名前の変更は同じ階層のまま。"/" を含めれば別の階層へ移せる
+        const parent = parentOf(e.tag);
+        const dest = name.includes("/") ? name : parent ? `${parent}/${name}` : name;
+        if (dest === e.tag) return cancelEdit();
+        await renameTag(e.tag, dest);
+        toast(`タグ「${e.tag}」を「${dest}」にしました`);
+      }
+      editing = null;
+    } catch (err) {
+      editError = errorText(err);
+    }
+  }
+
+  async function removeTag(tag: string) {
+    const n = app.config ? usageCount(app.config, tag) : 0;
+    const parent = parentOf(tag);
+    const msg =
+      `タグ「${tag}」と、その下の階層のタグを削除します。` +
+      (n ? `\n付いているプロジェクト ${n} 件は${parent ? `「${parent}」` : "「タグなし」"}へ移ります。` : "");
+    if (!confirm(msg)) return;
+    try {
+      await deleteTag(tag);
+      toast(`タグ「${tag}」を削除しました`);
+    } catch (err) {
+      toast(errorText(err));
+    }
+  }
+
+  function editKey(e: KeyboardEvent) {
+    if (e.key === "Enter" && !e.isComposing) commitEdit();
+    else if (e.key === "Escape") cancelEdit();
+  }
+
   function select(p: Project) {
     selectedKey = p.key === selectedKey ? null : p.key;
   }
@@ -257,6 +374,7 @@
 {#snippet branch(n: TreeNode, depth: number)}
   {#each n.children as c (c.id)}
     {@const open = !collapsed.has(cKey(c))}
+    {@const tagMode = prefs.stateView === "tag" && !c.special}
     <li
       class="group"
       class:drop={dropId === c.id}
@@ -264,15 +382,56 @@
       ondragover={(e) => prefs.stateView === "tag" && overGroup(e, c)}
       ondrop={(e) => prefs.stateView === "tag" && dropOnGroup(e, c)}
     >
-      <button class="group-head" class:special={c.special} aria-expanded={open} onclick={() => toggle(c)}>
-        <svg class="chev" class:open viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
-        <span class="g-label">{c.label}</span>
-        <span class="g-count num">{c.total}</span>
-        {#if c.leftovers}<span class="badge mid">取り残し {c.leftovers}</span>{/if}
-        <span class="g-when muted">{relative(c.lastActivity, now)}</span>
-      </button>
+      <div
+        class="group-head"
+        class:special={c.special}
+        class:tag-draggable={tagMode && !editing}
+        role="group"
+        aria-label={c.label}
+        draggable={tagMode && !editing ? "true" : undefined}
+        ondragstart={tagMode ? (e) => startTagDrag(e, c) : undefined}
+        ondragend={endDrag}
+      >
+        {#if editing?.mode === "rename" && editing.tag === c.id}
+          <svg class="chev" class:open viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
+          <!-- svelte-ignore a11y_autofocus -->
+          <input class="tag-input" bind:value={editValue} onkeydown={editKey} onblur={cancelEdit} autofocus />
+          {#if editError}<span class="edit-err">{editError}</span>{/if}
+        {:else}
+          <button class="toggle" aria-expanded={open} onclick={() => toggle(c)}>
+            <svg class="chev" class:open viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>
+            <span class="g-label">{c.label}</span>
+            <span class="g-count num">{c.total}</span>
+            {#if c.leftovers}<span class="badge mid">取り残し {c.leftovers}</span>{/if}
+          </button>
+          {#if tagMode}
+            <span class="g-actions">
+              {#if depthOf(c.id) < MAX_DEPTH}
+                <button class="ghost icon-btn" title="「{c.id}」の下にタグを追加" onclick={() => startAdd(c.id)}>＋ 下に追加</button>
+              {/if}
+              <button class="ghost icon-btn" onclick={() => startRename(c.id)}>名前を変更</button>
+              <button class="ghost icon-btn" onclick={() => removeTag(c.id)}>削除</button>
+            </span>
+          {/if}
+          <span class="g-when muted">{relative(c.lastActivity, now)}</span>
+        {/if}
+      </div>
       {#if open}
         <ul class="sub">
+          {#if editing?.mode === "add" && editing.parent === c.id}
+            <li class="add-row">
+              <!-- svelte-ignore a11y_autofocus -->
+              <input
+                class="tag-input"
+                placeholder="新しいタグの名前"
+                bind:value={editValue}
+                onkeydown={editKey}
+                onblur={cancelEdit}
+                autofocus
+              />
+              {#if editError}<span class="edit-err">{editError}</span>{/if}
+            </li>
+          {/if}
           {@render branch(c, depth + 1)}
           {#each c.projects as p (p.key)}
             <ProjectRow
@@ -321,6 +480,9 @@
               <option value="name">名前順</option>
             </select>
           </label>
+          {#if prefs.stateView === "tag"}
+            <button class="small" onclick={() => startAdd(null)}>タグを追加</button>
+          {/if}
           {#if tree}
             <span class="spacer"></span>
             <button class="ghost small" onclick={() => setAll(true)}>すべて開く</button>
@@ -369,13 +531,28 @@
         {#if !hasAnyTag}
           タグはまだありません。プロジェクトを選ぶと、右の詳細パネルで「仕事/客先/案件」のように / 区切りで 3 階層まで付けられます。
         {:else}
-          行をタグの見出し (または中) へドラッグすると移せます。{isMacLike ? "Option" : "Ctrl"} を押しながらだと元のタグも残し、「タグなし」へ落とすとタグを外します。
+          行をタグへドラッグすると付け替え ({isMacLike ? "Option" : "Ctrl"} を押しながらだと元のタグも残す)、「タグなし」へ落とすと外せます。
+          タグの見出しもドラッグで別のタグの下へ移せます。見出しにカーソルを乗せると、下に追加・名前の変更・削除ができます。
         {/if}
       </p>
     {/if}
 
     <ul class="list" bind:this={listEl}>
       {#if tree}
+        {#if editing?.mode === "add" && editing.parent === null}
+          <li class="add-row top">
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="tag-input"
+              placeholder="新しいタグ (「仕事/客先」のように / で下の階層も作れる)"
+              bind:value={editValue}
+              onkeydown={editKey}
+              onblur={cancelEdit}
+              autofocus
+            />
+            {#if editError}<span class="edit-err">{editError}</span>{/if}
+          </li>
+        {/if}
         {@render branch(tree, 0)}
         {#if !tree.children.length}<li class="none muted">該当するプロジェクトはありません</li>{/if}
       {:else}
@@ -502,19 +679,94 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    border: none;
-    border-radius: 0;
     border-bottom: 1px solid var(--line);
     background: var(--surface-2);
-    padding: 5px 12px 5px 8px;
-    text-align: left;
+    padding: 0 12px 0 0;
+    min-height: 31px;
     position: sticky;
     top: calc(var(--depth) * 31px);
     z-index: calc(10 - var(--depth));
   }
 
-  .group-head:hover:not(:disabled) {
+  .group-head:hover {
     background: color-mix(in srgb, var(--ink) 7%, var(--surface-2));
+  }
+
+  .group-head.tag-draggable {
+    cursor: grab;
+  }
+
+  /* 畳む / 開くボタン */
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 5px 0 5px 8px;
+    text-align: left;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+
+  .toggle:hover:not(:disabled) {
+    background: transparent;
+  }
+
+  /* 見出しの操作はカーソルを乗せたときだけ */
+  .g-actions {
+    display: none;
+    gap: 2px;
+  }
+
+  .group-head:hover .g-actions,
+  .group-head:focus-within .g-actions {
+    display: inline-flex;
+  }
+
+  .icon-btn {
+    font-size: 12px;
+    padding: 1px 7px;
+    color: var(--ink-2);
+  }
+
+  .tag-input {
+    font-size: 13px;
+    padding: 2px 6px;
+    min-width: 200px;
+  }
+
+  .group-head > .tag-input {
+    margin: 3px 0;
+  }
+
+  .group-head > .chev {
+    margin-left: 8px;
+  }
+
+  .add-row {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px 5px 30px;
+    border-bottom: 1px solid var(--line);
+    background: var(--accent-wash);
+  }
+
+  .add-row.top {
+    padding-left: 12px;
+  }
+
+  .add-row .tag-input {
+    width: 360px;
+    max-width: 100%;
+  }
+
+  .edit-err {
+    font-size: 12px;
+    color: var(--st-high);
   }
 
   .group-head.special .g-label {

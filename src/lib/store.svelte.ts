@@ -2,6 +2,7 @@
 
 import * as api from "./api";
 import type { Config, Snapshot } from "./types";
+import * as tags_ from "./tags";
 
 export const app = $state({
   config: null as Config | null,
@@ -95,37 +96,16 @@ export async function updateConfig(next: Config, opts: { refresh?: boolean; remo
   if (opts.refresh) await refresh(opts.remote ?? false);
 }
 
-/** タグを "a / b / c" → "a/b/c" に整える。3 階層を超える・空なら null */
-export function normalizeTag(raw: string): string | null {
-  const parts = raw
-    .split("/")
-    .map((x) => x.trim())
-    .filter(Boolean);
-  if (parts.length === 0 || parts.length > 3) return null;
-  return parts.join("/");
-}
+// タグの操作の本体は tags.ts。ここでは設定に反映するだけ
+export { isAncestorTag, normalizeTag, tidyTags } from "./tags";
 
-/** a が b の上の階層か ("自作" と "自作/アプリ") */
-export function isAncestorTag(a: string, b: string): boolean {
-  return b.startsWith(a + "/");
-}
-
-/**
- * タグの組を整える。重複を除き、下の階層のタグがあるときは上の階層のタグを落とす
- * ("自作" と "自作/アプリ" なら "自作/アプリ" だけ。下の階層のタグが上の階層も表しているので)
- */
-export function tidyTags(tags: string[]): string[] {
-  const uniq = [...new Set(tags)];
-  return uniq.filter((t) => !uniq.some((u) => isAncestorTag(t, u)));
+async function applyTags(change: (cfg: Config) => Config) {
+  if (!app.config) return;
+  await updateConfig(change(app.config));
 }
 
 export async function setTags(key: string, tags: string[]) {
-  if (!app.config) return;
-  const next = { ...(app.config.tags ?? {}) };
-  const uniq = tidyTags(tags);
-  if (uniq.length) next[key] = uniq;
-  else delete next[key];
-  await updateConfig({ ...app.config, tags: next });
+  await applyTags((c) => tags_.setProjectTags(c, key, tags));
 }
 
 /**
@@ -143,18 +123,23 @@ export async function moveTag(
   let next = [...current];
   if (from && !copy) next = next.filter((t) => t !== from);
   if (to && !next.includes(to)) next.push(to);
-  next = tidyTags(next);
-  const before = tidyTags(current);
+  next = tags_.tidyTags(next);
+  const before = tags_.tidyTags(current);
   if (next.length === before.length && next.every((t) => before.includes(t))) return false;
   await setTags(key, next);
   return true;
 }
 
-/** 使われているタグすべて (候補の表示用) */
+/** 空のタグを作る */
+export const createTag = (raw: string) => applyTags((c) => tags_.createTag(c, raw));
+/** 名前の変更・別の階層への移動 (下の階層とプロジェクトのタグも一緒に) */
+export const renameTag = (from: string, to: string) => applyTags((c) => tags_.renameTag(c, from, to));
+/** 削除。付いていたプロジェクトは親のタグへ */
+export const deleteTag = (path: string) => applyTags((c) => tags_.deleteTag(c, path));
+
+/** 存在するタグすべて (候補の表示用) */
 export function allTags(): string[] {
-  const set = new Set<string>();
-  for (const ts of Object.values(app.config?.tags ?? {})) for (const t of ts) set.add(t);
-  return [...set].sort((a, b) => a.localeCompare(b, "ja"));
+  return app.config ? tags_.definedTags(app.config) : [];
 }
 
 /** プロジェクトを一覧から外す / 戻す */

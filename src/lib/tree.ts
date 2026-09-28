@@ -102,9 +102,24 @@ function compress(n: TreeNode, root: TreeNode) {
  * 自分で付けたタグの階層 ("仕事/客先/案件")。複数のタグがあれば、それぞれの場所に出る。
  * タグの無いものは末尾の「タグなし」に入れる。
  */
-export function tagTree(projects: Project[], sortProjects: (xs: Project[]) => Project[]): TreeNode {
+export function tagTree(
+  projects: Project[],
+  sortProjects: (xs: Project[]) => Project[],
+  /** 作ったタグ。プロジェクトが無くても見出しとして出す */
+  defs: string[] = [],
+): TreeNode {
   const root = node("", "");
   const untagged = node("#untagged", "タグなし", true);
+  const ensure = (t: string) => {
+    let cur = root;
+    let id = "";
+    for (const s of t.split("/").slice(0, 3)) {
+      id = id ? `${id}/${s}` : s;
+      cur = child(cur, id, s);
+    }
+    return cur;
+  };
+  defs.forEach(ensure);
   for (const p of projects) {
     if (!p.tags.length) {
       untagged.projects.push(p);
@@ -112,12 +127,7 @@ export function tagTree(projects: Project[], sortProjects: (xs: Project[]) => Pr
     }
     // 上の階層のタグは、下の階層のタグがあれば飛ばす (同じプロジェクトが親子の両方に出ないように)
     for (const t of p.tags.filter((t) => !p.tags.some((u) => u.startsWith(t + "/")))) {
-      let cur = root;
-      let id = "";
-      for (const s of t.split("/").slice(0, 3)) {
-        id = id ? `${id}/${s}` : s;
-        cur = child(cur, id, s);
-      }
+      const cur = ensure(t);
       if (!cur.projects.includes(p)) cur.projects.push(p);
     }
   }

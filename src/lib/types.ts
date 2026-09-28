@@ -111,6 +111,8 @@ export interface Config {
   hidden: string[];
   /** プロジェクトの設定キー (Project.prefKey) -> タグ ("仕事/客先/案件" のように / で 3 階層まで) */
   tags: Record<string, string[]>;
+  /** 作ったタグの一覧 (プロジェクトが無くても削除するまで残す) */
+  tagDefs: string[];
 }
 
 export type AccountKind = "github" | "gogs" | "gitea";
