@@ -17,6 +17,7 @@ features = [
   "コミットと Claude セッションを日ごとに並べる履歴と、カレンダー・週ごとの棒・プロジェクト × 週などのグラフ",
   "日報 / 週報の Markdown をプレビューを見ながら手直しし、コピー・保存できる",
   "GitHub (GitHub CLI のログインを借用可) / Gogs / Gitea の一覧と照合し、未クローンのものをクローンできる",
+  "Claude のセッションの全文を見て、そこから再開・分岐して再開できる",
 ]
 
 # 動く環境 (例: "Windows 10 / 11")
@@ -28,6 +29,7 @@ screenshots = [
   "docs/images/10_history.png",
   "docs/images/11_graph.png",
   "docs/images/12_report.png",
+  "docs/images/18_transcript.png",
 ]
 
 # false にするとトップの一覧から外す (LP とリリース記録は作る)
