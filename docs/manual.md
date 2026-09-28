@@ -310,6 +310,7 @@ GitHub / Gogs / Gitea を足します。
 |---|---|
 | クローン先の親フォルダ | クローンのダイアログの既定 |
 | Claude のログの場所 | 空なら `%USERPROFILE%\.claude\projects` |
+| Claude Code のログの保存期間 | Claude Code の `cleanupPeriodDays` (下を参照)。「変更」を押したときだけ書き込む |
 | テーマ | OS に合わせる / ライト / ダーク (タイトルバーも合わせる) |
 | 一覧の密度 | 標準 / コンパクト (行を詰め、Claude の一行要約を省く) |
 | 端末 | 「端末」ボタンで開くもの。この PC で見つかったもの (Windows Terminal / PowerShell 7 / Windows PowerShell / コマンドプロンプト / Git Bash / WSL) から選ぶ |
@@ -318,6 +319,13 @@ GitHub / Gogs / Gitea を足します。
 | 自動実行のセッション | SDK などからの自動実行のセッションも活動に数えるか |
 
 表示の設定はこの PC だけのもので、すぐに反映されます。
+
+**Claude Code のログの保存期間** — Claude Code は、保存期間 (既定 30 日) より古いセッションのログを起動時に消します。
+消えたセッションは RepoTether の履歴・グラフ・日報・会話の全文からも消えるので、長く残したいなら延ばしてください
+(既定 / 90 日 / 180 日 / 1 年 / 10 年 / 日数を指定)。書き換えるのは Claude Code の設定ファイル
+(`%USERPROFILE%\.claude\settings.json`、`CLAUDE_CONFIG_DIR` があればそこ) の `cleanupPeriodDays` だけで、
+ほかの項目は中身も並び順も変えません。「既定」を選ぶと項目を消して既定に戻します。
+効くのは次に起動する Claude Code からで、すでに消えたログは戻りません。
 
 ![表示・その他](images/16_settings_other.png)
 
@@ -397,6 +405,7 @@ GitHub / Gogs / Gitea を足します。
 | 「再開」で「No conversation found」と出る | セッションを始めたフォルダが移動・削除された。Claude Code はフォルダごとにセッションを記録するので、元のフォルダでないと再開できない |
 | 「再開」「Claude」で端末は開くが claude が動かない | `claude` が PATH に無い。端末で `claude --version` が動くか確かめる |
 | 会話の全文が「見つかりません」 | ログが消されたか、別の PC のセッション (履歴は取り込み時の要約から出している) |
+| 1 か月より前の Claude の履歴が無い | Claude Code が既定で 30 日より古いログを消すため。「表示・その他」の「Claude Code のログの保存期間」を延ばす (消えた分は戻らない) |
 
 ---
 

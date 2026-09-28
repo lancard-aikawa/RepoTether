@@ -1,5 +1,6 @@
 //! データの取り込み。Tauri に依存しないので examples/dump.rs からも呼べる。
 
+pub mod claude_settings;
 pub mod config;
 pub mod discover;
 pub mod gh;

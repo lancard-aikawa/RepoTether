@@ -167,6 +167,32 @@ export interface TerminalChoice {
   label: string;
 }
 
+export interface ClaudeRetention {
+  /** ~/.claude/settings.json の場所 */
+  path: string;
+  /** 書かれている保存期間 (日)。null なら既定 */
+  days: number | null;
+  defaultDays: number;
+}
+
+// ブラウザ表示では Claude Code の設定を読めないので、画面の確認用に覚えておくだけ
+let mockRetention: ClaudeRetention = { path: "%USERPROFILE%\\.claude\\settings.json", days: null, defaultDays: 30 };
+
+/** Claude Code のセッションの保存期間 (cleanupPeriodDays) */
+export async function getClaudeRetention(): Promise<ClaudeRetention> {
+  if (!inTauri) return { ...mockRetention };
+  return call("get_claude_retention");
+}
+
+/** 保存期間を書く。null なら既定に戻す (項目を消す) */
+export async function setClaudeRetention(days: number | null): Promise<ClaudeRetention> {
+  if (!inTauri) {
+    mockRetention = { ...mockRetention, days };
+    return { ...mockRetention };
+  }
+  return call("set_claude_retention", { days });
+}
+
 /** この PC で見つかった端末 */
 export async function listTerminals(): Promise<TerminalChoice[]> {
   if (!inTauri) return [{ id: "wt", label: "Windows Terminal" }, { id: "pwsh", label: "PowerShell 7" }];

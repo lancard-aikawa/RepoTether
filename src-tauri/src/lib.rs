@@ -162,6 +162,35 @@ async fn session_transcript(
         .map_err(|e| e.to_string())?
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaudeRetention {
+    /// settings.json の場所
+    path: String,
+    /// 書かれている保存期間。null なら既定
+    days: Option<u32>,
+    default_days: u32,
+}
+
+/// Claude Code のセッションの保存期間 (~/.claude/settings.json の cleanupPeriodDays)
+#[tauri::command]
+fn get_claude_retention() -> Result<ClaudeRetention, String> {
+    let path = core::claude_settings::settings_path().ok_or("Claude Code の設定の場所が分かりません")?;
+    Ok(ClaudeRetention {
+        days: core::claude_settings::cleanup_days(&path)?,
+        path: util::display_path(&path.to_string_lossy()),
+        default_days: core::claude_settings::DEFAULT_DAYS,
+    })
+}
+
+/// 保存期間を書く。null なら項目を消して既定に戻す。ほかの項目は変えない
+#[tauri::command]
+fn set_claude_retention(days: Option<u32>) -> Result<ClaudeRetention, String> {
+    let path = core::claude_settings::settings_path().ok_or("Claude Code の設定の場所が分かりません")?;
+    core::claude_settings::set_cleanup_days(&path, days)?;
+    get_claude_retention()
+}
+
 /// この PC で選べる端末
 #[tauri::command]
 fn list_terminals() -> Vec<launch::TerminalChoice> {
@@ -344,7 +373,9 @@ pub fn run() {
             repo_log,
             claude_open,
             claude_resume,
-            session_transcript
+            session_transcript,
+            get_claude_retention,
+            set_claude_retention
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

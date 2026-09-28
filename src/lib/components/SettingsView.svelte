@@ -186,6 +186,60 @@
     savePrefs();
   }
 
+  // ---- Claude Code の保存期間 (~/.claude/settings.json の cleanupPeriodDays) ----
+  // 設定の下書きとは別に、「変更」を押したときだけ Claude Code の設定ファイルへ書く
+  let retention = $state<api.ClaudeRetention | null>(null);
+  let retentionError = $state("");
+  let retentionChoice = $state("default");
+  let retentionCustom = $state(365);
+  let retentionSaving = $state(false);
+
+  function syncChoice(r: api.ClaudeRetention) {
+    if (r.days == null) retentionChoice = "default";
+    else if ([90, 180, 365, 3650].includes(r.days)) retentionChoice = String(r.days);
+    else {
+      retentionChoice = "custom";
+      retentionCustom = r.days;
+    }
+  }
+
+  $effect(() => {
+    api
+      .getClaudeRetention()
+      .then((r) => {
+        retention = r;
+        syncChoice(r);
+      })
+      .catch((e) => (retentionError = errorText(e)));
+  });
+
+  const chosenDays = $derived(
+    retentionChoice === "default" ? null : retentionChoice === "custom" ? Number(retentionCustom) : Number(retentionChoice),
+  );
+  const retentionChanged = $derived(!!retention && chosenDays !== retention.days);
+
+  function daysLabel(d: number): string {
+    if (d % 365 === 0) return `${d} 日 (約 ${d / 365} 年)`;
+    return `${d} 日`;
+  }
+
+  async function saveRetention() {
+    if (chosenDays != null && (!Number.isInteger(chosenDays) || chosenDays < 1 || chosenDays > 36500)) {
+      toast("保存期間は 1〜36500 日にしてください");
+      return;
+    }
+    retentionSaving = true;
+    try {
+      retention = await api.setClaudeRetention(chosenDays);
+      syncChoice(retention);
+      toast(chosenDays == null ? "Claude Code の保存期間を既定に戻しました" : `Claude Code の保存期間を ${chosenDays} 日にしました`);
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      retentionSaving = false;
+    }
+  }
+
   // この PC で見つかった端末
   let terminals = $state<api.TerminalChoice[]>([]);
   $effect(() => {
@@ -428,6 +482,43 @@
         <label for="claude-dir">Claude のログの場所</label>
         <input id="claude-dir" type="text" class="mono" bind:value={draft.claudeDir} placeholder="空なら %USERPROFILE%\.claude\projects" />
       </div>
+    </section>
+
+    <section class="panel card">
+      <h2>Claude Code のログの保存期間</h2>
+      <p class="note">
+        Claude Code は、保存期間 (既定 {retention?.defaultDays ?? 30} 日) より古いセッションのログを起動時に消します。
+        消えたセッションは、RepoTether の履歴・グラフ・日報・会話の全文からも消えます。
+        ここで変えると Claude Code の設定ファイルの <code>cleanupPeriodDays</code> だけを書き換え、ほかの設定には触れません。
+        効くのは次に起動する Claude Code からで、すでに消えたログは戻りません。
+      </p>
+      {#if retentionError}
+        <p class="gh-error">{retentionError}</p>
+      {:else if retention}
+        <div class="inline">
+          <span class="muted">今の設定</span>
+          <strong>{retention.days == null ? `既定 (${retention.defaultDays} 日)` : daysLabel(retention.days)}</strong>
+          {#if (retention.days ?? retention.defaultDays) <= 30}
+            <span class="badge mid">1 か月より前の会話は消えていきます</span>
+          {/if}
+        </div>
+        <div class="inline">
+          <select bind:value={retentionChoice} aria-label="保存期間">
+            <option value="default">既定 ({retention.defaultDays} 日)</option>
+            {#each [90, 180, 365, 3650] as d (d)}<option value={String(d)}>{daysLabel(d)}</option>{/each}
+            <option value="custom">日数を指定</option>
+          </select>
+          {#if retentionChoice === "custom"}
+            <input type="number" min="1" max="36500" bind:value={retentionCustom} aria-label="保存期間 (日)" /> <span class="muted">日</span>
+          {/if}
+          <button onclick={saveRetention} disabled={!retentionChanged || retentionSaving}>
+            {retentionSaving ? "書き込んでいます…" : "変更"}
+          </button>
+        </div>
+        <p class="note mono">{retention.path}</p>
+      {:else}
+        <p class="muted">読み込んでいます…</p>
+      {/if}
     </section>
 
     <section class="panel card">
