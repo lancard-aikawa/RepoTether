@@ -54,6 +54,7 @@
 </script>
 
 <li
+  data-key={p.key}
   class:selected
   class:hidden={p.hidden}
   class:draggable={!!ondragstart}

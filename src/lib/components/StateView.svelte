@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import type { Project } from "$lib/derive";
   import { hasLeftovers, leftoverWeight } from "$lib/derive";
   import type { RemoteKind } from "$lib/remotes";
@@ -377,8 +378,14 @@
     else if (e.key === "Escape") cancelEdit();
   }
 
-  function select(p: Project) {
+  /** 詳細を開け閉めすると一覧の幅が変わり、行の折り返しで高さが変わる。押した行が同じ位置に残るようにスクロールを直す */
+  async function select(p: Project) {
+    const find = () => listEl?.querySelector<HTMLElement>(`li[data-key="${CSS.escape(p.key)}"]`) ?? null;
+    const before = find()?.getBoundingClientRect().top;
     selectedKey = p.key === selectedKey ? null : p.key;
+    await tick();
+    const after = find()?.getBoundingClientRect().top;
+    if (listEl && before != null && after != null) listEl.scrollTop += after - before;
   }
 </script>
 
@@ -461,91 +468,92 @@
   {/each}
 {/snippet}
 
-<div class="layout">
-  <section class="list-pane">
-    <div class="bar">
-      <!-- 1 行目: 検索と件数 -->
-      <div class="bar-row">
-        <span class="caption">検索</span>
-        <div class="controls">
-          <input class="search" type="search" placeholder="名前・パス・タグで検索" bind:value={query} aria-label="検索" />
-          <span class="result muted num">{shown.length} / {projects.length} 件</span>
-        </div>
-      </div>
-
-      <!-- 2 行目: 見え方 (表示形式と並び替え) -->
-      <div class="bar-row">
-        <span class="caption">表示</span>
-        <div class="controls">
-          <div class="segmented" role="group" aria-label="表示形式">
-            {#each views as v (v.id)}
-              <button class:on={prefs.stateView === v.id} onclick={() => setView(v.id)}>{v.label}</button>
-            {/each}
-          </div>
-          <label class="field">
-            <span class="muted">並び</span>
-            <select bind:value={sort}>
-              <option value="recent">最近の作業順</option>
-              <option value="stale">取り残し・放置が長い順</option>
-              <option value="weight">取り残しが重い順</option>
-              <option value="name">名前順</option>
-            </select>
-          </label>
-          {#if prefs.stateView === "tag"}
-            <button class="small" onclick={() => startAdd(null)}>タグを追加</button>
-          {/if}
-          {#if tree}
-            <span class="spacer"></span>
-            <button class="ghost small" onclick={() => setAll(true)}>すべて開く</button>
-            <button class="ghost small" onclick={() => setAll(false)}>すべて畳む</button>
-          {/if}
-        </div>
-      </div>
-
-      <!-- 3 行目: 絞り込み (対象を減らすものはすべてここ) -->
-      <div class="bar-row">
-        <span class="caption">絞り込み</span>
-        <div class="controls">
-          <div class="segmented" role="group" aria-label="状態で絞り込み">
-            {#each filters as f (f.id)}
-              <button class:on={filter === f.id} onclick={() => (filter = f.id)}
-                >{f.label} <span class="muted num">{counts[f.id]}</span></button
-              >
-            {/each}
-          </div>
-          <label class="field">
-            <span class="muted">リモート</span>
-            <select bind:value={remoteFilter} class:active={remoteFilter !== ""}>
-              <option value="">すべて</option>
-              {#each remoteOptions as o (o.id)}
-                <option value={o.id}>{o.label} ({o.count})</option>
-              {/each}
-            </select>
-          </label>
-          <label class="field">
-            <span class="muted">非表示</span>
-            <select bind:value={visibility} class:active={visibility !== "shown"}>
-              <option value="shown">除く</option>
-              <option value="hidden">だけ ({hiddenCount})</option>
-              <option value="all">含める</option>
-            </select>
-          </label>
-          {#if forkArchivedCount}
-            <label class="check small-text" title="クローンして作業しているフォークは隠しません">
-              <input
-                type="checkbox"
-                checked={prefs.hideForkArchived}
-                onchange={(e) => setHideForkArchived(e.currentTarget.checked)}
-              />
-              未クローンのフォーク・アーカイブを隠す <span class="muted num">({forkArchivedCount})</span>
-            </label>
-          {/if}
-          {#if filtering}
-            <button class="ghost small" onclick={clearFilters}>条件を解除</button>
-          {/if}
-        </div>
+<div class="state">
+  <div class="bar">
+    <!-- 1 行目: 検索と件数 -->
+    <div class="bar-row">
+      <span class="caption">検索</span>
+      <div class="controls">
+        <input class="search" type="search" placeholder="名前・パス・タグで検索" bind:value={query} aria-label="検索" />
+        <span class="result muted num">{shown.length} / {projects.length} 件</span>
       </div>
     </div>
+
+    <!-- 2 行目: 見え方 (表示形式と並び替え) -->
+    <div class="bar-row">
+      <span class="caption">表示</span>
+      <div class="controls">
+        <div class="segmented" role="group" aria-label="表示形式">
+          {#each views as v (v.id)}
+            <button class:on={prefs.stateView === v.id} onclick={() => setView(v.id)}>{v.label}</button>
+          {/each}
+        </div>
+        <label class="field">
+          <span class="muted">並び</span>
+          <select bind:value={sort}>
+            <option value="recent">最近の作業順</option>
+            <option value="stale">取り残し・放置が長い順</option>
+            <option value="weight">取り残しが重い順</option>
+            <option value="name">名前順</option>
+          </select>
+        </label>
+        {#if prefs.stateView === "tag"}
+          <button class="small" onclick={() => startAdd(null)}>タグを追加</button>
+        {/if}
+        {#if tree}
+          <span class="spacer"></span>
+          <button class="ghost small" onclick={() => setAll(true)}>すべて開く</button>
+          <button class="ghost small" onclick={() => setAll(false)}>すべて畳む</button>
+        {/if}
+      </div>
+    </div>
+
+    <!-- 3 行目: 絞り込み (対象を減らすものはすべてここ) -->
+    <div class="bar-row">
+      <span class="caption">絞り込み</span>
+      <div class="controls">
+        <div class="segmented" role="group" aria-label="状態で絞り込み">
+          {#each filters as f (f.id)}
+            <button class:on={filter === f.id} onclick={() => (filter = f.id)}
+              >{f.label} <span class="muted num">{counts[f.id]}</span></button
+            >
+          {/each}
+        </div>
+        <label class="field">
+          <span class="muted">リモート</span>
+          <select bind:value={remoteFilter} class:active={remoteFilter !== ""}>
+            <option value="">すべて</option>
+            {#each remoteOptions as o (o.id)}
+              <option value={o.id}>{o.label} ({o.count})</option>
+            {/each}
+          </select>
+        </label>
+        <label class="field">
+          <span class="muted">非表示</span>
+          <select bind:value={visibility} class:active={visibility !== "shown"}>
+            <option value="shown">除く</option>
+            <option value="hidden">だけ ({hiddenCount})</option>
+            <option value="all">含める</option>
+          </select>
+        </label>
+        {#if forkArchivedCount}
+          <label class="check small-text" title="クローンして作業しているフォークは隠しません">
+            <input
+              type="checkbox"
+              checked={prefs.hideForkArchived}
+              onchange={(e) => setHideForkArchived(e.currentTarget.checked)}
+            />
+            未クローンのフォーク・アーカイブを隠す <span class="muted num">({forkArchivedCount})</span>
+          </label>
+        {/if}
+        {#if filtering}
+          <button class="ghost small" onclick={clearFilters}>条件を解除</button>
+        {/if}
+      </div>
+    </div>
+  </div>
+<div class="layout">
+  <section class="list-pane">
 
     {#if prefs.stateView === "tag"}
       <p class="hint muted">
@@ -587,11 +595,20 @@
   </section>
 
   {#if selected}
-    <ProjectDetail project={selected} {now} onclose={() => (selectedKey = null)} />
+    <ProjectDetail project={selected} {now} onclose={() => select(selected)} />
   {/if}
+</div>
 </div>
 
 <style>
+  /* 操作欄は全幅。詳細を開いても幅が変わらず、折り返しで一覧の位置がずれない */
+  .state {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+
   .layout {
     display: flex;
     flex: 1;
