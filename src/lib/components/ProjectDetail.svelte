@@ -2,18 +2,47 @@
   import type { Project } from "$lib/derive";
   import { formatDateTime, formatTime, relative, toMs, dayKey, formatDayLabel } from "$lib/format";
   import * as api from "$lib/api";
-  import { errorText, refresh, setHidden, toast } from "$lib/store.svelte";
+  import { allTags, errorText, normalizeTag, refresh, setHidden, setTags, toast } from "$lib/store.svelte";
   import ProjectActions from "./ProjectActions.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
 
   let { project, now, onclose }: { project: Project; now: number; onclose: () => void } = $props();
 
   let showAllCommits = $state(false);
+  let newTag = $state("");
+  let tagError = $state("");
+  const tagChoices = $derived(allTags().filter((t) => !project.tags.includes(t)));
+
+  async function addTag() {
+    const t = normalizeTag(newTag);
+    if (!t) {
+      tagError = "「仕事/客先/案件」のように、/ 区切りで 3 階層までにしてください";
+      return;
+    }
+    tagError = "";
+    try {
+      await setTags(project.prefKey, [...project.tags, t]);
+      newTag = "";
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  async function removeTag(t: string) {
+    try {
+      await setTags(
+        project.prefKey,
+        project.tags.filter((x) => x !== t),
+      );
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
 
   const r = $derived(project.local);
   const sessions = $derived(project.sessions.slice(0, 8));
   const commits = $derived((showAllCommits ? project.commits : project.myCommits).slice(0, 15));
-  const hideKey = $derived(project.kind === "remote" ? project.key.replace(/^remote:/, "") : project.key);
+
 
   async function trust() {
     if (!project.path) return;
@@ -60,6 +89,35 @@
   </div>
 
   <div class="body">
+    <section>
+      <h3>タグ</h3>
+      {#if project.tags.length}
+        <div class="tags">
+          {#each project.tags as t (t)}
+            <span class="tag-chip">
+              {t}
+              <button class="x" onclick={() => removeTag(t)} aria-label="タグ {t} を外す">×</button>
+            </span>
+          {/each}
+        </div>
+      {/if}
+      <div class="tag-add">
+        <input
+          type="text"
+          list="tag-choices"
+          placeholder="仕事/客先/案件 (3 階層まで)"
+          bind:value={newTag}
+          oninput={() => (tagError = "")}
+          onkeydown={(e) => e.key === "Enter" && !e.isComposing && addTag()}
+        />
+        <button onclick={addTag} disabled={!newTag.trim()}>追加</button>
+        <datalist id="tag-choices">
+          {#each tagChoices as t (t)}<option value={t}></option>{/each}
+        </datalist>
+      </div>
+      {#if tagError}<p class="small err">{tagError}</p>{/if}
+    </section>
+
     {#if project.leftovers.length}
       <section>
         <h3>取り残し</h3>
@@ -195,9 +253,9 @@
 
     <section>
       {#if project.hidden}
-        <button onclick={() => setHidden(hideKey, false)}>一覧に戻す</button>
+        <button onclick={() => setHidden(project.prefKey, false)}>表示に戻す</button>
       {:else}
-        <button onclick={() => setHidden(hideKey, true)} title="設定の「非表示」から戻せます">一覧から外す</button>
+        <button onclick={() => setHidden(project.prefKey, true)} title="状態タブの「非表示」で見られます。履歴・グラフ・日報には出なくなります">非表示にする</button>
       {/if}
     </section>
   </div>
@@ -338,6 +396,45 @@
     border: 1px solid var(--line-strong);
     border-radius: 4px;
     padding: 0 5px;
+  }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 6px;
+  }
+
+  .tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+    padding: 1px 2px 1px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--line-strong);
+    background: var(--surface-2);
+  }
+
+  .tag-chip .x {
+    border: none;
+    background: transparent;
+    padding: 0 5px;
+    line-height: 1.2;
+    color: var(--ink-2);
+  }
+
+  .tag-add {
+    display: flex;
+    gap: 6px;
+  }
+
+  .tag-add input {
+    flex: 1;
+  }
+
+  .err {
+    color: var(--st-high);
   }
 
   .remotes {

@@ -21,6 +21,10 @@ export interface Leftover {
 
 export interface Project {
   key: string;
+  /** 設定 (非表示・タグ) で使うキー */
+  prefKey: string;
+  /** 自分で付けたタグ */
+  tags: string[];
   kind: ProjectKind;
   name: string;
   path: string | null;
@@ -58,6 +62,7 @@ function pathKey(p: string): string {
 
 export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): Project[] {
   const hidden = new Set(cfg.hidden);
+  const tagsOf = (k: string) => cfg.tags?.[k] ?? [];
   const commitsByRepo = groupBy(snap.commits, (c) => c.repoId);
   const sessionsByRepo = groupBy(
     snap.sessions.filter((s) => s.repoId),
@@ -86,6 +91,8 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
       finish(
         {
           key: repo.id,
+          prefKey: repo.id,
+          tags: tagsOf(repo.id),
           kind: "local",
           name: repo.name,
           path: repo.path,
@@ -111,6 +118,8 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
       finish(
         {
           key: `remote:${r.key}`,
+          prefKey: r.key,
+          tags: tagsOf(r.key),
           kind: "remote",
           name: r.name,
           path: null,
@@ -141,6 +150,8 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
       finish(
         {
           key: `folder:${key}`,
+          prefKey: `folder:${key}`,
+          tags: tagsOf(`folder:${key}`),
           kind: "folder",
           name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,
           path,

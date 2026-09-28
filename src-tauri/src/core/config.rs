@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use super::{secrets, util};
@@ -23,6 +24,8 @@ pub struct Config {
     pub clone_root: Option<String>,
     /// 一覧から外すリポジトリ (LocalRepo.id または RemoteRepo.key)
     pub hidden: Vec<String>,
+    /// プロジェクトに付けたタグ。キーは hidden と同じ。タグは "仕事/客先/案件" のように / で 3 階層まで
+    pub tags: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -53,16 +56,19 @@ fn is_false(b: &bool) -> bool {
 }
 
 impl Account {
-    /// API を呼ぶときのトークン。資格情報マネージャーから読む
+    /// API を呼ぶときのトークン。資格情報マネージャーから読む。
+    /// 資格情報マネージャーに手で登録したものも使えるよう、has_token に関係なく探す
     pub fn resolve_token(&self) -> Result<String, String> {
         if !self.token.trim().is_empty() {
             return Ok(self.token.trim().to_string());
         }
-        if !self.has_token {
-            return Ok(String::new());
+        match secrets::get(&secrets::target(&self.id))? {
+            Some(t) => Ok(t),
+            None if self.has_token => {
+                Err("資格情報マネージャーにトークンがありません。設定で入れ直してください".into())
+            }
+            None => Ok(String::new()),
         }
-        secrets::get(&secrets::target(&self.id))?
-            .ok_or_else(|| "資格情報マネージャーにトークンがありません。設定で入れ直してください".into())
     }
 }
 
@@ -78,6 +84,7 @@ impl Default for Config {
             accounts: vec![],
             clone_root: None,
             hidden: vec![],
+            tags: BTreeMap::new(),
         }
     }
 }
@@ -142,12 +149,16 @@ impl Config {
         Ok(true)
     }
 
-    /// 画面に渡す形。トークンは含めない (has_token だけ)
+    /// 画面に渡す形。トークンは含めない。has_token は資格情報マネージャーに実際にあるかで決める
+    /// (手で登録した・手で消した場合も画面の表示が合うように)
     pub fn for_view(&self) -> Config {
         let mut c = self.clone();
         for a in &mut c.accounts {
             a.token.clear();
             a.clear_token = false;
+            if let Ok(found) = secrets::get(&secrets::target(&a.id)) {
+                a.has_token = found.is_some();
+            }
         }
         c
     }

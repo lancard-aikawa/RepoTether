@@ -15,6 +15,15 @@
   /** 保存済みのトークンを入れ直そうとしているアカウント */
   const replacing = new SvelteSet<string>();
 
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("コピーしました");
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
   async function openStore() {
     try {
       await api.openSecretStore();
@@ -94,7 +103,7 @@
     replacing.clear();
   }
 
-  function setPref(k: "includeAutomated" | "showHidden", v: boolean) {
+  function setPref(k: "includeAutomated", v: boolean) {
     prefs[k] = v;
     savePrefs();
   }
@@ -172,6 +181,26 @@
         読み取り権限だけのトークンを使ってください。
       </p>
       <button onclick={openStore}>{api.secretStoreApp}を開く</button>
+      <details class="howto">
+        <summary>{api.secretStoreName}に手で登録するには</summary>
+        {#if api.isMac}
+          <p>
+            キーチェーンアクセスで「新規パスワード項目」を作り、キーチェーン項目名に <code>RepoTether</code>、アカウント名に
+            下の「{api.secretStoreName}での名前」(例: <code>RepoTether:acc1</code>)、パスワードにトークンを入れます。
+          </p>
+        {:else}
+          <p>
+            先にこの画面でアカウントを追加して保存しておき、資格情報マネージャーの「Windows 資格情報」→「汎用資格情報の追加」で
+            次のように入れます。
+          </p>
+          <ul>
+            <li>インターネットまたはネットワークのアドレス: 下の「{api.secretStoreName}での名前」(例: <code>RepoTether:acc1</code>)</li>
+            <li>ユーザー名: 何でもよい (Gogs のユーザー名など)</li>
+            <li>パスワード: トークン</li>
+          </ul>
+        {/if}
+        <p>登録したら、この画面を開き直すと「保存済み」になります。普通はこの画面でトークンを入れて保存するだけで十分です。</p>
+      </details>
       {#each draft.accounts as a, i (a.id)}
         <div class="account">
           <div class="acc-head">
@@ -221,6 +250,11 @@
                 {/if}
               </div>
             {/if}
+            <span class="muted">{api.secretStoreName}での名前</span>
+            <div class="inline">
+              <code class="mono">RepoTether:{a.id}</code>
+              <button class="ghost" onclick={() => copy(`RepoTether:${a.id}`)}>コピー</button>
+            </div>
           </div>
         </div>
       {/each}
@@ -254,16 +288,12 @@
           <input type="checkbox" checked={prefs.includeAutomated} onchange={(e) => setPref("includeAutomated", e.currentTarget.checked)} />
           SDK などからの自動実行のセッションも活動に数える
         </label>
-        <label class="check">
-          <input type="checkbox" checked={prefs.showHidden} onchange={(e) => setPref("showHidden", e.currentTarget.checked)} />
-          一覧から外したプロジェクトも表示する
-        </label>
       </div>
     </section>
 
     {#if hiddenRows.length}
       <section class="panel card">
-        <h2>一覧から外したもの</h2>
+        <h2>非表示にしたもの</h2>
         <ul class="rows">
           {#each hiddenRows as h, i (h.key)}
             <li>
@@ -388,6 +418,30 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .howto {
+    font-size: 12px;
+    color: var(--ink-2);
+    width: 100%;
+  }
+
+  .howto summary {
+    cursor: pointer;
+    color: var(--ink);
+  }
+
+  .howto p,
+  .howto ul {
+    margin: 6px 0;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--surface-2);
+    padding: 0 4px;
+    border-radius: 3px;
   }
 
   .account {

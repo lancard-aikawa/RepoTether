@@ -34,6 +34,7 @@ const mockConfig: Config = {
   accounts: [],
   cloneRoot: null,
   hidden: [],
+  tags: {},
 };
 
 export async function getConfig(): Promise<Config> {
@@ -44,7 +45,8 @@ export async function getConfig(): Promise<Config> {
 /** 保存後の設定 (トークンは抜いたもの) を返す */
 export async function saveConfig(config: Config): Promise<Config> {
   if (!inTauri) {
-    const next = structuredClone(config);
+    // Svelte の $state (Proxy) は structuredClone できないので JSON で写す (本番の invoke も JSON で送る)
+    const next: Config = JSON.parse(JSON.stringify(config));
     for (const a of next.accounts) {
       if (a.clearToken) a.hasToken = false;
       else if (a.token.trim()) a.hasToken = true;

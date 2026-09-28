@@ -16,8 +16,13 @@ export const app = $state({
 export const prefs = $state({
   tab: "state" as Tab,
   includeAutomated: false,
-  showHidden: false,
+  /** 状態タブの表示形式 */
+  stateView: "time" as StateViewMode,
+  /** ツリーで畳んでいるノード ("folder:<id>" / "tag:<id>") */
+  collapsed: [] as string[],
 });
+
+export type StateViewMode = "time" | "folder" | "tag";
 
 export type Tab = "state" | "history" | "graph" | "report" | "settings";
 
@@ -84,6 +89,32 @@ export async function refresh(includeRemote: boolean) {
 export async function updateConfig(next: Config, opts: { refresh?: boolean; remote?: boolean } = {}) {
   app.config = await api.saveConfig(next);
   if (opts.refresh) await refresh(opts.remote ?? false);
+}
+
+/** タグを "a / b / c" → "a/b/c" に整える。3 階層を超える・空なら null */
+export function normalizeTag(raw: string): string | null {
+  const parts = raw
+    .split("/")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (parts.length === 0 || parts.length > 3) return null;
+  return parts.join("/");
+}
+
+export async function setTags(key: string, tags: string[]) {
+  if (!app.config) return;
+  const next = { ...(app.config.tags ?? {}) };
+  const uniq = [...new Set(tags)];
+  if (uniq.length) next[key] = uniq;
+  else delete next[key];
+  await updateConfig({ ...app.config, tags: next });
+}
+
+/** 使われているタグすべて (候補の表示用) */
+export function allTags(): string[] {
+  const set = new Set<string>();
+  for (const ts of Object.values(app.config?.tags ?? {})) for (const t of ts) set.add(t);
+  return [...set].sort((a, b) => a.localeCompare(b, "ja"));
 }
 
 /** プロジェクトを一覧から外す / 戻す */

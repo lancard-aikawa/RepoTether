@@ -23,7 +23,8 @@
       ? buildProjects(app.snapshot, app.config, { includeAutomated: prefs.includeAutomated })
       : [],
   );
-  const visible = $derived(prefs.showHidden ? projects : projects.filter((p) => !p.hidden));
+  // 非表示にしたものは、状態タブの絞り込みでだけ見られる。履歴・グラフ・日報には出さない
+  const visible = $derived(projects.filter((p) => !p.hidden));
 
   // 相対時刻の表示を 1 分ごとに進める
   let now = $state(Date.now());
@@ -93,7 +94,7 @@
         {/if}
       </div>
     {:else if prefs.tab === "state"}
-      <StateView projects={visible} {now} />
+      <StateView {projects} {now} />
     {:else if prefs.tab === "history"}
       <HistoryView projects={visible} />
     {:else if prefs.tab === "graph"}
