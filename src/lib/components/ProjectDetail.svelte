@@ -1,9 +1,11 @@
 <script lang="ts">
   import type { Project } from "$lib/derive";
+  import type { Commit } from "$lib/types";
   import { formatDateTime, formatTime, relative, toMs, dayKey, formatDayLabel } from "$lib/format";
   import * as api from "$lib/api";
   import {
     allTags,
+    app,
     isAncestorTag,
     errorText,
     normalizeTag,
@@ -99,7 +101,12 @@
       [
         { id: "summary", label: "概要", show: true },
         { id: "git", label: "git", show: project.kind !== "folder" },
-        { id: "commits", label: "コミット", count: project.myCommits.length, show: project.commits.length > 0 },
+        {
+          id: "commits",
+          label: "コミット",
+          count: project.myCommits.length || undefined,
+          show: project.commits.length > 0 || (project.kind === "local" && !project.local?.error),
+        },
         { id: "claude", label: "Claude", count: project.sessions.length, show: project.sessions.length > 0 },
         // 読み込み中は出しておき、無いと分かったら消す (タブがちらつかないように)
         { id: "readme", label: "README", show: readme.state === "loading" || readme.state === "found" },
@@ -126,6 +133,42 @@
   const sessions = $derived(project.sessions.slice(0, sessionLimit));
   const commitSource = $derived(showAllCommits ? project.commits : project.myCommits);
   const commits = $derived(commitSource.slice(0, commitLimit));
+
+  // ---- 期間より前のコミット (git から 10 件ずつ) ----
+  const PAGE = 10;
+  let older = $state<Commit[]>([]);
+  let olderDone = $state(false);
+  let olderLoading = $state(false);
+  let olderError = $state("");
+
+  // 別のプロジェクト・「他の人の分も」を切り替えたら読み直す
+  $effect(() => {
+    void project.key;
+    void showAllCommits;
+    older = [];
+    olderDone = false;
+    olderError = "";
+  });
+
+  /** 期間内のコミットを出し切ったら、git から続きを読む */
+  const windowDone = $derived(commits.length >= commitSource.length);
+
+  async function loadOlder() {
+    if (!project.path) return;
+    olderLoading = true;
+    olderError = "";
+    try {
+      // 取り込みと同じ並びなので、表示済みの件数だけ飛ばせば続きになる
+      const got = await api.repoLog(project.path, commitSource.length + older.length, PAGE, !showAllCommits);
+      const seen = new Set([...commitSource, ...older].map((c) => c.hash));
+      older = [...older, ...got.filter((c) => !seen.has(c.hash))];
+      if (got.length < PAGE) olderDone = true;
+    } catch (e) {
+      olderError = errorText(e);
+    } finally {
+      olderLoading = false;
+    }
+  }
   const webLink = $derived(project.links[0] ?? null);
 
 
@@ -348,18 +391,32 @@
           </label>
         </h3>
         <ul class="plain commits">
-          {#each commits as c (c.hash)}
+          {#each [...commits, ...(windowDone ? older : [])] as c (c.hash)}
             <li>
               <span class="muted small num">{formatDateTime(toMs(c.at) ?? 0)}</span>
               <span class="subject">{c.subject}</span>
               {#if showAllCommits}<span class="muted small">{c.authorName}</span>{/if}
             </li>
           {:else}
-            <li class="muted small">自分のコミットはありません</li>
+            {#if olderDone}
+              <li class="muted small">{showAllCommits ? "コミットはありません" : "自分のコミットはありません"}</li>
+            {:else}
+              <li class="muted small">
+                過去 {app.config?.historyDays ?? 365} 日の{showAllCommits ? "" : "自分の"}コミットはありません。下のボタンで、それより前を読めます
+              </li>
+            {/if}
           {/each}
         </ul>
-        {#if commitSource.length > commits.length}
+        {#if !windowDone}
           <button class="more" onclick={() => (commitLimit += 50)}>さらに表示 (残り {commitSource.length - commits.length} 件)</button>
+        {:else if olderError}
+          <p class="small err">{olderError}</p>
+        {:else if !olderDone}
+          <button class="more" onclick={loadOlder} disabled={olderLoading}>
+            {olderLoading ? "読んでいます…" : `次の ${PAGE} 件を読む${older.length ? "" : " (それより前のコミット)"}`}
+          </button>
+        {:else if commits.length || older.length}
+          <p class="muted small">これより前のコミットはありません</p>
         {/if}
       </section>
     {/if}

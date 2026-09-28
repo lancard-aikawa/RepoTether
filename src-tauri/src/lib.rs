@@ -94,6 +94,27 @@ fn read_readme(path: String) -> Result<Option<Readme>, String> {
     Ok(None)
 }
 
+/// 詳細パネルの「次の 10 件」: 期間に関係なく、skip 件目から limit 件のコミット。
+/// mine_only なら設定の「自分のメールアドレス」のものだけ
+#[tauri::command]
+async fn repo_log(
+    state: State<'_, AppState>,
+    path: String,
+    skip: u32,
+    limit: u32,
+    mine_only: bool,
+) -> Result<Vec<core::model::Commit>, String> {
+    let p = PathBuf::from(&path);
+    if !p.is_absolute() || !core::discover::is_repo(&p) {
+        return Err(format!("git のリポジトリではありません: {path}"));
+    }
+    let authors = if mine_only { state.config.lock().unwrap().author_emails.clone() } else { vec![] };
+    let id = util::path_key(&path);
+    tauri::async_runtime::spawn_blocking(move || core::git::log_page(&p, &id, skip, limit, &authors))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// この PC で選べる端末
 #[tauri::command]
 fn list_terminals() -> Vec<launch::TerminalChoice> {
@@ -272,7 +293,8 @@ pub fn run() {
             open_credential_manager,
             read_readme,
             check_gh,
-            list_terminals
+            list_terminals,
+            repo_log
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,7 +2,7 @@
 // ブラウザで `pnpm dev` だけを開いたとき (Tauri の外) は、static/dev-snapshot.json を読む表示確認用のモードになる。
 // dev-snapshot.json は `cargo run --example dump -- ../static/dev-snapshot.json` で作る (git には入れない)。
 
-import type { Config, Snapshot } from "./types";
+import type { Commit, Config, Snapshot } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -96,6 +96,27 @@ export type OpenTarget = "vscode" | "terminal" | "explorer";
 export async function openIn(target: OpenTarget, path: string, terminal = ""): Promise<void> {
   if (!inTauri) throw new Error("ブラウザ表示では開けません");
   return call("open_in", { target, path, terminal });
+}
+
+/** 期間に関係なく、新しい方から skip 件を飛ばして limit 件のコミット (詳細パネルの「次の 10 件」) */
+export async function repoLog(path: string, skip: number, limit: number, mineOnly: boolean): Promise<Commit[]> {
+  if (!inTauri) {
+    // ブラウザ表示ではリポジトリを読めないので、画面の確認用に古い日付の見本を返す (60 件で終わり)
+    const total = 60;
+    return Array.from({ length: Math.max(0, Math.min(limit, total - skip)) }, (_, i) => {
+      const n = skip + i;
+      return {
+        repoId: path,
+        hash: `sample${n}`,
+        at: new Date(Date.UTC(2021, 0, 1) - n * 86400000 * 7).toISOString(),
+        authorName: mineOnly ? "自分" : n % 2 ? "自分" : "ほかの人",
+        authorEmail: "sample@example.com",
+        subject: `見本のコミット ${n + 1}`,
+        isMerge: false,
+      };
+    });
+  }
+  return call("repo_log", { path, skip, limit, mineOnly });
 }
 
 export interface TerminalChoice {

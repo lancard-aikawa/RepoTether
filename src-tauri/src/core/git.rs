@@ -236,9 +236,37 @@ fn read_log(path: &Path, repo_id: &str, history_days: u32) -> Result<Vec<Commit>
             "--remotes",
             "--tags",
             &since,
-            "--format=%H%x1f%aI%x1f%an%x1f%ae%x1f%P%x1f%s%x1e",
+            LOG_FORMAT,
         ],
     )?;
+    Ok(parse_log(&out, repo_id))
+}
+
+const LOG_FORMAT: &str = "--format=%H%x1f%aI%x1f%an%x1f%ae%x1f%P%x1f%s%x1e";
+
+/// 期間に関係なく、新しい方から skip 件を飛ばして limit 件読む (詳細パネルの「次の 10 件」)。
+/// authors があれば、その作者 (メールアドレス、完全一致ではなく部分一致) のコミットだけ。
+/// 取り込み (read_log) と同じ並び (コミット日時の新しい順) なので、skip = 表示済みの件数で続きが読める
+pub fn log_page(path: &Path, repo_id: &str, skip: u32, limit: u32, authors: &[String]) -> Result<Vec<Commit>, String> {
+    let skip = format!("--skip={skip}");
+    let limit = format!("-n{}", limit.min(200));
+    let mut args: Vec<String> = ["log", "--branches", "--remotes", "--tags"].iter().map(|s| s.to_string()).collect();
+    args.push(skip);
+    args.push(limit);
+    if !authors.is_empty() {
+        // メールアドレスの . や + を正規表現として扱わない
+        args.push("--fixed-strings".into());
+        for a in authors {
+            args.push(format!("--author=<{}>", a.trim()));
+        }
+    }
+    args.push(LOG_FORMAT.into());
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let out = git(path, &refs)?;
+    Ok(parse_log(&out, repo_id))
+}
+
+fn parse_log(out: &str, repo_id: &str) -> Vec<Commit> {
     let mut commits = vec![];
     for rec in out.split('\x1e') {
         let rec = rec.trim_matches(['\n', '\r']);
@@ -256,7 +284,7 @@ fn read_log(path: &Path, repo_id: &str, history_days: u32) -> Result<Vec<Commit>
             subject: f[5].to_string(),
         });
     }
-    Ok(commits)
+    commits
 }
 
 /// fetch 1 回の上限。接続できない古いサーバーを待ち続けない
@@ -339,5 +367,24 @@ mod tests {
         assert_eq!(parse_track("[ahead 2, behind 3]"), (2, 3, false));
         assert_eq!(parse_track("[gone]"), (0, 0, true));
         assert_eq!(parse_track(""), (0, 0, false));
+    }
+}
+
+#[cfg(test)]
+mod log_page_tests {
+    use super::*;
+
+    /// このリポジトリ自身で、続きが重ならずに読めるか
+    #[test]
+    fn pages_do_not_overlap() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let a = log_page(root, "x", 0, 3, &[]).unwrap();
+        let b = log_page(root, "x", 3, 3, &[]).unwrap();
+        assert_eq!(a.len(), 3);
+        assert!(!b.is_empty());
+        assert!(b.iter().all(|c| !a.iter().any(|d| d.hash == c.hash)));
+        // 作者で絞る (このリポジトリのコミットは noreply ではない自分のアドレス)
+        let none = log_page(root, "x", 0, 5, &["nobody@example.invalid".into()]).unwrap();
+        assert!(none.is_empty());
     }
 }
