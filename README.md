@@ -90,6 +90,15 @@ git のコミットグラフ (ブランチのツリー表示) も入れない。
 
 開発サーバーの起動は LocalLauncher (`../LocalLauncher`) の担当。
 
+## 起動
+
+`run-repotether.bat` をダブルクリックする。
+
+- ビルド済みの exe があり、ソースより新しければそのまま起動する
+- exe が無いか、ソースのほうが新しければ、先にビルドしてから起動する (初回は 3〜4 分)
+- `run-repotether.bat dev` で `pnpm tauri dev` (画面の変更がすぐ反映される)、`run-repotether.bat build` で作り直してから起動
+- `node_modules` が無ければ `pnpm install` から始める
+
 ## 開発
 
 Tauri v2 + SvelteKit (adapter-static) + Svelte 5 + TypeScript。パッケージは pnpm。
