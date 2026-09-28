@@ -29,13 +29,14 @@ tokio = { version = "1.53.1", features = ["rt", "macros"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "query", "native-tls", "charset", "http2", "system-proxy"] }
 
 
-# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+# 個人用ツールなので、サイズより再ビルドの速さを取る。
+# lto = true / codegen-units = 1 にすると exe は小さくなるが、1 行直すたびの再ビルドが約 6 秒 → 約 2 分になる。
+# 人に配るときだけ戻す
 [profile.release]
-codegen-units = 1
-lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+incremental = true
 
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }

@@ -37,7 +37,19 @@ if errorlevel 1 goto :build
 goto :start
 
 :build
-echo === Building RepoTether ^(first build takes a few minutes^) ===
+REM A running exe cannot be overwritten, so close it first (with confirmation)
+tasklist /fi "imagename eq repotether.exe" 2>nul | find /i "repotether.exe" >nul
+if not errorlevel 1 (
+    echo RepoTether is running. It must be closed to rebuild.
+    choice /c YN /m "Close it now"
+    if errorlevel 2 (
+        echo Starting the existing build without rebuilding.
+        goto :start
+    )
+    taskkill /im repotether.exe >nul
+    timeout /t 2 /nobreak >nul
+)
+echo === Building RepoTether ^(about 15 seconds; a few minutes the first time^) ===
 call pnpm tauri build --no-bundle
 if errorlevel 1 goto :fail
 

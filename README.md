@@ -95,8 +95,11 @@ git のコミットグラフ (ブランチのツリー表示) も入れない。
 `run-repotether.bat` をダブルクリックする。
 
 - ビルド済みの exe があり、ソースより新しければそのまま起動する
-- exe が無いか、ソースのほうが新しければ、先にビルドしてから起動する (初回は 3〜4 分)
-- `run-repotether.bat dev` で `pnpm tauri dev` (画面の変更がすぐ反映される)、`run-repotether.bat build` で作り直してから起動
+- exe が無いか、ソースのほうが新しければ、先にビルドしてから起動する (約 15 秒。依存を作り直す初回だけ 3〜4 分)
+- 起動中の exe は上書きできないので、再ビルドが要るときは閉じてよいかを聞く (N ならビルドせず今の exe で起動)
+- `run-repotether.bat dev` で `pnpm tauri dev`、`run-repotether.bat build` で作り直してから起動
+
+直しながら確かめるときは `dev` がよい。画面の変更は保存した瞬間に反映され、Rust の変更も自動で再ビルドされる。
 - `node_modules` が無ければ `pnpm install` から始める
 
 ## 開発
