@@ -1,0 +1,40 @@
+name: ci
+
+# main への push と pull request で、型チェックとテストを流す
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # git.rs のテストがこのリポジトリ自身の履歴を読む
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test
+      # Tauri は build/ (画面) があることを前提にするので、先に作る
+      - run: pnpm build
+      - run: cargo test --lib
+        working-directory: src-tauri

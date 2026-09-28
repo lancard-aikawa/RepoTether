@@ -1,161 +1,175 @@
 # RepoTether
 
 ローカルの git リポジトリ、Claude Code のセッション、GitHub / Gogs / Gitea のリポジトリ一覧をまとめて、
-「いつ何をやったか」「どこに時間を使っているか」「いま何が取り残されているか」を見る個人用ツール。
+「いつ何をやったか」「どこに時間を使っているか」「いま何が取り残されているか」を見る個人用のデスクトップアプリ (Windows)。
 
-プロジェクトを手で登録しない。探す場所とアカウントを決めれば、あとは自動で集まる。
+プロジェクトを手で登録しない。探すフォルダとアカウントを決めれば、あとは自動で集まる。
+
+## 動作環境
+
+- Windows 10 / 11 (64 bit)。WebView2 (Windows 11 と、更新済みの Windows 10 には入っている) が要る
+- [Git for Windows](https://gitforwindows.org/) (`git` コマンド)
+- 任意: [GitHub CLI](https://cli.github.com/) (`gh`)。GitHub の一覧を gh のログインで取るとき
+- 任意: [Claude Code](https://claude.com/claude-code)。セッションの履歴を見るとき
+
+macOS 向けのコードもあるが、実機では確認していない (下の「macOS」を参照)。
+
+## インストール
+
+[Releases](https://github.com/lancard-aikawa/RepoTether/releases) から、どちらかを入れる。
+
+- `RepoTether_<版>_x64-setup.exe` — インストーラー。スタートメニューに登録される。WebView2 が無ければ入れる
+- `RepoTether-<版>-win-x64.zip` — 展開した `RepoTether.exe` を起動するだけ。どこに置いてもよい
+
+署名していないので、初回は Windows の SmartScreen が「PC が保護されました」と出す。
+「詳細情報」→「実行」で起動する。
+
+## 使い始め
+
+1. 起動すると、よくある場所 (`~\Repos`、`C:\Repos` など) からリポジトリを探して並べる
+2. 「設定 → 探す場所」で、リポジトリを置いているフォルダを足す
+3. 「設定 → 自分のコミット」で、自分のメールアドレスを選ぶ (履歴・グラフ・日報は、これで自分のコミットを数える)
+4. GitHub の一覧も見るなら「設定 → アカウント → GitHub を追加」。`gh auth login --web` でログイン済みなら、そのまま使える
 
 ## 画面
 
 | タブ | 見せるもの | 答える問い |
 |---|---|---|
-| **状態** | プロジェクトごとの取り残し (未コミット・未 push・未マージのブランチ・stash など) と、直前の Claude セッション | いま何が取り残されているか |
+| **状態** | プロジェクトごとの取り残し (未コミット・未 push・未マージのブランチ・stash など)、Claude / git / 変更の時刻、直前の Claude セッション | いま何が取り残されているか |
 | **履歴** | コミットと Claude セッションを、日 → プロジェクトの順にまとめて並べる | いつ、何をやったか |
-| **グラフ** | 日ごとのカレンダー (1 年)、週ごとの棒 (26 週)、プロジェクト × 週、止まっているプロジェクト | どこに時間を使っているか、どれが止まっているか |
-| **日報** | 日報 / 週報の Markdown。手直ししてコピー・保存できる | 報告に何を書くか |
-| **設定** | 探す場所、自分のメールアドレス、リモートのアカウント | |
+| **グラフ** | 日ごとのカレンダー (1 年)、週ごとの棒 (26 週)、プロジェクト × 週、止まっているプロジェクト | どこに時間を使っているか |
+| **日報** | 日報 / 週報の Markdown。プレビューを見ながら手直しし、コピー・保存できる | 報告に何を書くか |
+| **設定** | 探す場所、自分のメールアドレス、アカウント、表示 (テーマ・密度・端末・自動更新) | |
 
-状態タブの各行から、VS Code・端末・エクスプローラー・ブラウザ (リモートのページ) で開ける。
-リモートにだけあるリポジトリはクローンできる。
+状態タブ:
 
-状態タブは「時系列 / フォルダ / タグ」で見せ方を切り替えられる。タグは自分で作る分類で、`仕事/客先/案件` のように
-`/` 区切りで 3 階層まで。タグ表示では、プロジェクトやタグの見出しをドラッグして付け替え・移動でき、
-見出しから追加・名前の変更・削除ができる。作ったタグはプロジェクトが無くなっても削除するまで残る。
+- 見せ方は「時系列 / フォルダ / タグ」。タグは自分で作る分類で、`仕事/客先/案件` のように `/` 区切りで 3 階層まで。
+  タグ表示では、プロジェクトやタグの見出しをドラッグして付け替え・並べ替え・移動でき、見出しから追加・名前の変更・削除ができる。
+  間違えたら直後に出る「元に戻す」で戻せる
+- 絞り込みは、スター・状態 (取り残しあり / 未クローン / git 以外 / 読めない)・リモートの種類・非表示
+- 各行から VS Code・端末・エクスプローラーで開ける。リモートの種類とパスの横のアイコンでブラウザを開く。
+  リモートにだけあるリポジトリはクローンできる
+- 行を選ぶと詳細パネル (概要 / リポジトリ / コミット / Claude / README)。コミットは取り込み期間より前も 10 件ずつ読める
 
 ## 集めるもの
 
-- **ローカルのリポジトリ** — 設定の「探す場所」を 3 階層 (変更可) まで探す。
+- **ローカルのリポジトリ** — 「探す場所」を 3 階層 (変更可) まで探す。
   Claude のセッションで使ったフォルダが git リポジトリなら、探す場所の外でも対象にする
-- **git の状態** — `git status --porcelain=v2`、`for-each-ref`、`log` を読む (libgit2 は使わない)。
+- **git の状態** — `git status --porcelain=v2`、`for-each-ref`、`log` を読む。
   読み取りだけで、`GIT_OPTIONAL_LOCKS=0` で index のロックも取らない
 - **コミット** — ブランチ・リモート追跡・タグから届くもの (stash は除く)。既定は過去 365 日
-- **Claude Code のセッション** — `~/.claude/projects/*/*.jsonl`。タイトル (`ai-title`)、最初と最後のプロンプト、
-  最後の返答、プロンプトの時刻を抜き出す。SDK からの自動実行 (`entrypoint` が `sdk-*`) は既定で活動に数えない
-- **リモートの一覧** — トークンがあれば `/user/repos` (見られる全部)、無ければ `/users/{user}/repos` (公開分)。
-  Gogs はトークンが必須。ローカルの remote URL と `host/owner/name` で照合する
-- **GitHub の認証** — 既定は GitHub CLI のログインを借りる (`gh auth token` を一覧を取るたびに呼ぶ)。
-  RepoTether にはトークンを置かない。ログインは `gh auth login --web` (ブラウザの OAuth)。トークンを直接使うこともできる
+- **Claude Code のセッション** — `~/.claude/projects/*/*.jsonl`。タイトル、最初と最後のプロンプト、最後の返答、
+  プロンプトの時刻を抜き出す。SDK からの自動実行は既定で活動に数えない
+- **リモートの一覧** — GitHub / Gogs / Gitea の API。ローカルの remote URL と `host/owner/name` で照合する
+- **git fetch (任意・既定はしない)** — リモートを更新するとき、各リポジトリで `git fetch --all --prune` もする。
+  裏で動くので認証の画面は出さず、1 つ 20 秒で打ち切る
+
+自動更新は、ローカル (既定 15 分) とリモート (既定 60 分) で別々に間隔を選べる。ウィンドウが見えていないあいだは止める。
 
 「自分のコミット」は設定のメールアドレスで判定する。GitHub の Web 上でのコミットは
 `...@users.noreply.github.com` になるので、設定画面の候補から足しておく。
+
+## 認証とトークン
+
+- **GitHub** — 既定は GitHub CLI のログインを借りる (一覧を取るたびに `gh auth token` を呼ぶ)。RepoTether にはトークンを置かない。
+  トークンを直接使うこともできる
+- **Gogs / Gitea** — トークンが要る (Gogs は「ユーザー設定 → アプリケーション」で作る)
+
+トークンは設定ファイルに書かず、OS の資格情報の保管庫に置く
+(Windows は資格情報マネージャーの `RepoTether:<アカウント ID>`、macOS はキーチェーン)。
+画面にも返さず「保存済み」とだけ出す。同じユーザーとして動くプログラムからは読めるので、読み取り権限だけのトークンを使う。
 
 ## データの置き場所
 
 | もの | Windows | macOS |
 |---|---|---|
-| 設定 | `%APPDATA%\com.repotether.app\config.json` | `~/Library/Application Support/com.repotether.app/config.json` |
-| トークン | 資格情報マネージャー (`RepoTether:<アカウント ID>`) | ログインキーチェーン (サービス `RepoTether`) |
+| 設定 (探す場所・タグ・スター・非表示など) | `%APPDATA%\com.repotether.app\config.json` | `~/Library/Application Support/com.repotether.app/config.json` |
+| トークン | 資格情報マネージャー | ログインキーチェーン |
 | 取り込み結果・セッション要約のキャッシュ | `%LOCALAPPDATA%\com.repotether.app\` | `~/Library/Caches/com.repotether.app/` |
 
-どれもリポジトリの外にあるので、git の対象にはならない。
-
-### トークン
-
-トークンは設定ファイルに書かず、OS の資格情報の保管庫に置く (Windows は DPAPI、macOS はキーチェーンで、
-OS のログインに結びつけて暗号化される)。画面にも返さず、「保存済み」とだけ出す。入れ直すか消すかを選べる。
-設定画面から資格情報マネージャー / キーチェーンアクセスを開ける。
-
-以前の版で `config.json` に平文で入っていたトークンは、起動時に保管庫へ移して設定ファイルから消す。
-同じユーザーとして動くプログラムからは読めてしまうので、読み取り権限だけのトークンを使う。
-
-Claude のログは全体で数百 MB あるので、ファイルの更新時刻とサイズが同じなら前回の要約を使う。
-初回は 30 秒ほど、2 回目以降は 5 秒ほど (96 リポジトリ・330 セッションで計測)。
-
-設定ファイルが壊れて読めないときは、`config.broken.json` に退避してから既定値で起動する。
-
-## macOS
-
-コードは OS ごとに分けてあり、macOS 向けに自前のコード (`core/` と `launch.rs`) がコンパイルできることは
-Windows 上で確認済み (`aarch64-apple-darwin`)。アプリ全体のビルドと動作は Mac 実機での確認が必要。
-
-| 項目 | Windows | macOS |
-|---|---|---|
-| VS Code で開く | Code.exe を直接起動 | `open -a "Visual Studio Code"` |
-| 端末 | Windows Terminal (無ければ PowerShell) | `open -a Terminal` |
-| フォルダ | エクスプローラー | Finder |
-| 既定の探す場所 | `~/Repos`、`~/source/repos`、`~/src`、`C〜F:\Repos` | `~/Repos`、`~/src`、`~/Developer`、`~/Projects`、`~/code` |
-| パスの照合 | 大文字小文字を区別しない | 区別しない (APFS の既定) |
-
-- Mac 用のビルドは Mac の上で行う (`pnpm tauri build`)。Windows からのクロスビルドはしない
-- 署名・公証はしていないので、初回は右クリック →「開く」で起動する
-- Linux は対象外 (動くかもしれないが、端末を開く・トークンの保存は未対応)
+Claude のログは全体で数百 MB になることがあるので、ファイルの更新時刻とサイズが同じなら前回の要約を使う
+(初回は 30 秒ほど、2 回目以降は数秒)。設定ファイルが壊れて読めないときは、`config.broken.json` に退避してから既定値で起動する。
 
 ## 読めないリポジトリ
 
 - **所有者チェック (dubious ownership)** — 別のドライブなどで、git がフォルダの所有者を確認できないもの。
-  詳細パネルの「safe.directory に追加」で、`git config --global --add safe.directory <パス>` を実行する
+  詳細パネルの「safe.directory に追加」で `git config --global --add safe.directory <パス>` を実行する
   (自分のフォルダであることを確かめてから)
 - **壊れた `.git`** — `.git` はあるが中身が無いもの。表示するだけ
 
 ## やらないこと
 
-サーバーモード、マルチユーザー、認証、チケット管理。
-(PMManage が広がりすぎた反省。必要になってから考える)
+サーバーモード、マルチユーザー、チケット管理、git のブランチのツリー表示 (GitKraken や VS Code の Git Graph で見られる)。
 
-git のコミットグラフ (ブランチのツリー表示) も入れない。GitKraken や VS Code の Git Graph で見られるため。
+## macOS
 
-開発サーバーの起動は LocalLauncher (`../LocalLauncher`) の担当。
+コードは OS ごとに分けてあり、macOS 向けの自前のコードがコンパイルできることは確認済み (`aarch64-apple-darwin`)。
+アプリ全体のビルドと動作は Mac の実機で確認していない。
 
-## 起動
+| 項目 | Windows | macOS |
+|---|---|---|
+| VS Code で開く | Code.exe を直接起動 | `open -a "Visual Studio Code"` |
+| 端末 | Windows Terminal / PowerShell / cmd / Git Bash / WSL から選ぶ | ターミナル / iTerm |
+| フォルダ | エクスプローラー | Finder |
+| トークン | 資格情報マネージャー | キーチェーン |
 
-`run-repotether.bat` をダブルクリックする。
-
-- ビルド済みの exe があり、ソースより新しければそのまま起動する
-- exe が無いか、ソースのほうが新しければ、先にビルドしてから起動する (約 15 秒。依存を作り直す初回だけ 3〜4 分)
-- 起動中の exe は上書きできないので、再ビルドが要るときは閉じてよいかを聞く (N ならビルドせず今の exe で起動)
-- `run-repotether.bat dev` で `pnpm tauri dev`、`run-repotether.bat build` で作り直してから起動
-
-直しながら確かめるときは `dev` がよい。画面の変更は保存した瞬間に反映され、Rust の変更も自動で再ビルドされる。
-- `node_modules` が無ければ `pnpm install` から始める
+Mac 用のビルドは Mac の上で行う (`pnpm tauri build`)。Linux は対象外。
 
 ## 開発
 
-Tauri v2 + SvelteKit (adapter-static) + Svelte 5 + TypeScript。パッケージは pnpm。
+Tauri v2 + SvelteKit (adapter-static) + Svelte 5 + TypeScript。パッケージは pnpm、Rust は stable。
 
 ```sh
 pnpm install
-pnpm tauri dev                 # デスクトップアプリ起動
+pnpm tauri dev                 # 起動 (画面の変更はすぐ反映、Rust の変更は自動で再ビルド)
 pnpm check                     # 型チェック
+pnpm test                      # フロントのテスト (tests/*.test.mts)
 cd src-tauri && cargo test     # Rust のテスト
-pnpm tauri build --no-bundle   # exe だけ作る (src-tauri/target/release/repotether.exe)
+pnpm tauri build               # 配布物 (exe とインストーラー)
 ```
 
-ポートは LPortMan の台帳に登録済み: Vite dev `11420` (Tauri の devUrl)、HMR `11421` (`TAURI_DEV_HOST` 指定時のみ)。
+Windows では `run-repotether.bat` でも起動できる (exe がソースより古ければ作り直してから起動。`dev` / `build` の引数あり)。
+開発サーバーのポートは `vite.config.js` の 11420 (HMR は 11421)。
 
 ### アプリを起動せずに取り込みを試す
 
 ```sh
 cd src-tauri
-cargo run --release --example dump -- ../static/dev-snapshot.json            # ローカルだけ
-cargo run --release --example dump -- ../static/dev-snapshot.json --remote   # リモートも
+cargo run --release --example dump -- ../static/dev-snapshot.json                     # ローカルだけ
+cargo run --release --example dump -- ../static/dev-snapshot.json --remote --fetch    # リモートと fetch も
 ```
 
-設定は `%APPDATA%\com.repotether.app\config.json` を読む。環境変数 `REPOTETHER_CONFIG` で別の設定ファイルを渡せる。
-
+設定はアプリと同じ場所を読む。環境変数 `REPOTETHER_CONFIG` で別の設定ファイルを渡せる。
 `static/dev-snapshot.json` を置いて `pnpm dev` をブラウザで開くと、その内容で画面を確認できる
-(読み取りだけ。開く・クローンなどの操作は使えない)。このファイルは自分のコミットやプロンプトを含むので git には入れない。
+(読み取りだけ)。このファイルは自分のコミットやプロンプトを含むので git には入れない (`.gitignore` 済み)。
 
 ### 構成
 
 ```
 src-tauri/src/
-  lib.rs            Tauri のコマンド (設定・更新・クローン・開く・保存ダイアログ)
+  lib.rs            Tauri のコマンド
   launch.rs         VS Code / 端末 / フォルダ / 資格情報の保管庫を開く (OS ごと)
   core/             取り込み。Tauri に依存しない
     discover.rs     リポジトリを探す
-    git.rs          git の状態とコミット、クローン
+    git.rs          git の状態・コミット・fetch・クローン
     sessions.rs     Claude のセッションの要約とキャッシュ
     remote.rs       GitHub / Gogs / Gitea の一覧
-    secrets.rs      トークンの保存 (Windows: 資格情報マネージャー / macOS: キーチェーン)
+    gh.rs           GitHub CLI のログインを借りる
+    secrets.rs      トークンの保存
     model.rs        画面に渡すデータの形
 src/lib/
-  derive.ts         取り込み結果をプロジェクト単位にまとめる。取り残しの判定、履歴・活動の集計
+  derive.ts         取り込み結果をプロジェクト単位にまとめる (取り残しの判定、履歴・活動の集計)
+  tags.ts           タグの操作 (作成・名前の変更・移動・並べ替え・削除)
+  remotes.ts        リモートの種類とブラウザ用の URL
   report.ts         日報 / 週報の Markdown
   components/       各タブの画面
 ```
 
-## 今後の候補
+### リリース
 
-- セッションの要約を LLM で作る (使うなら無料の経路: `claude -p` のサブスク枠 / ローカルの gemma)
-- Gogs / Gitea のトークンありでの取得は未検証 (公開分の GitHub と、Gogs の 403 応答までは確認済み)
-- Mac 実機での動作確認
+`package.json`・`src-tauri/Cargo.toml`・`src-tauri/tauri.conf.json` の版を上げ、`CHANGELOG.md` にその版の節を書いてから、
+`v<版>` のタグを push する。GitHub Actions がビルドして、zip とインストーラーを付けた Release を下書きで作る。
+
+## ライセンス
+
+[MIT](LICENSE)

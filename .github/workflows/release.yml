@@ -1,0 +1,146 @@
+name: release
+
+# タグを打つ = リリース。版はタグが正で、コード側 (package.json / src-tauri/Cargo.toml /
+# src-tauri/tauri.conf.json) と食い違っていたらビルドせずに落とす。
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# workflow_dispatch で手動実行するとビルドと検証だけ行い、成果物は Actions の artifact に置く (Release は作らない)。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: src-tauri
+
+      - name: 版を決める (タグと 3 か所の一致を検査)
+        id: version
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $conf = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargo = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          Write-Host "package.json    : $pkg"
+          Write-Host "tauri.conf.json : $conf"
+          Write-Host "Cargo.toml      : $cargo"
+          if ($pkg -ne $conf -or $pkg -ne $cargo) {
+            throw "package.json ($pkg) / tauri.conf.json ($conf) / Cargo.toml ($cargo) の版がそろっていません"
+          }
+          if ('${{ github.ref_type }}' -eq 'tag') {
+            $tag = '${{ github.ref_name }}'
+            $want = $tag -replace '^v', ''
+            if ($want -ne $pkg) {
+              throw "タグ $tag は版 $want を意味しますが、コードは $pkg です。3 か所を上げてからタグを打ち直してください"
+            }
+          }
+          "version=$pkg" >> $env:GITHUB_OUTPUT
+          "zip=RepoTether-$pkg-win-x64.zip" >> $env:GITHUB_OUTPUT
+
+      - name: テスト
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm install --frozen-lockfile
+          pnpm check
+          if ($LASTEXITCODE -ne 0) { throw "型チェックが失敗しました" }
+          pnpm test
+          if ($LASTEXITCODE -ne 0) { throw "フロントのテストが失敗しました" }
+          pnpm build
+          Push-Location src-tauri
+          cargo test --lib
+          if ($LASTEXITCODE -ne 0) { throw "Rust のテストが失敗しました" }
+          Pop-Location
+
+      - name: ビルド (exe とインストーラー)
+        run: |
+          pnpm tauri build --bundles nsis
+          if ($LASTEXITCODE -ne 0) { throw "ビルドが失敗しました" }
+
+      - name: 成果物を確かめて zip を作る
+        id: dist
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          $exe = 'src-tauri/target/release/repotether.exe'
+          if (-not (Test-Path $exe)) { throw "$exe がありません" }
+          $pv = (Get-Item $exe).VersionInfo.ProductVersion
+          Write-Host "exe の ProductVersion: $pv"
+          if (-not $pv.StartsWith($version)) { throw "exe の版 ($pv) が想定 ($version) と違います" }
+          $setup = Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw "インストーラーがありません" }
+          if ($setup.Name -notmatch [regex]::Escape($version)) { throw "インストーラーの名前 ($($setup.Name)) に版 $version が入っていません" }
+
+          New-Item -ItemType Directory -Force dist/RepoTether | Out-Null
+          Copy-Item $exe dist/RepoTether/RepoTether.exe
+          Copy-Item LICENSE, README.md dist/RepoTether/
+          Compress-Archive -Path dist/RepoTether -DestinationPath 'dist/${{ steps.version.outputs.zip }}'
+          Copy-Item $setup.FullName dist/
+          "setup=$($setup.Name)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: RepoTether-${{ steps.version.outputs.version }}
+          path: |
+            dist/${{ steps.version.outputs.zip }}
+            dist/${{ steps.dist.outputs.setup }}
+
+      # 本文は「その版の変更点」(CHANGELOG.md) + 「初めての方へ」(packaging/release-intro.md)
+      - name: Release の本文を組み立てる
+        if: github.ref_type == 'tag'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          $lines = Get-Content CHANGELOG.md
+          $at = ($lines | Select-String -Pattern "^##\s+$([regex]::Escape($version))\s*$").LineNumber
+          if (-not $at) {
+            throw "CHANGELOG.md に $version の節がありません。変更点を書いてからタグを打ち直してください"
+          }
+          $rest = $lines[$at..($lines.Count - 1)]
+          $end = ($rest | Select-String -Pattern '^##\s' | Select-Object -First 1).LineNumber
+          $body = if ($end) { $rest[0..($end - 2)] } else { $rest }
+          $body = ($body -join "`n").Trim()
+          if (-not $body) { throw "CHANGELOG.md の $version の節が空です" }
+          $intro = (Get-Content packaging/release-intro.md -Raw) -replace '(?s)<!--.*?-->', ''
+          Set-Content -Path dist/release-body.md -Encoding utf8 -Value @(
+            "## $version の変更点", '', $body, '', $intro.Trim()
+          )
+
+      - name: Release を作る (下書き)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create '${{ github.ref_name }}' `
+            'dist/${{ steps.version.outputs.zip }}' `
+            'dist/${{ steps.dist.outputs.setup }}' `
+            --title 'RepoTether ${{ steps.version.outputs.version }}' `
+            --notes-file dist/release-body.md `
+            --draft
