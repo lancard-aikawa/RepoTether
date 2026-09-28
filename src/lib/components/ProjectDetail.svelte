@@ -2,8 +2,20 @@
   import type { Project } from "$lib/derive";
   import { formatDateTime, formatTime, relative, toMs, dayKey, formatDayLabel } from "$lib/format";
   import * as api from "$lib/api";
-  import { allTags, errorText, normalizeTag, refresh, setHidden, setTags, toast } from "$lib/store.svelte";
+  import {
+    allTags,
+    errorText,
+    normalizeTag,
+    prefs,
+    refresh,
+    savePrefs,
+    setHidden,
+    setTags,
+    toast,
+    type DetailTab,
+  } from "$lib/store.svelte";
   import ProjectActions from "./ProjectActions.svelte";
+  import ReadmeView from "./ReadmeView.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
 
   let { project, now, onclose }: { project: Project; now: number; onclose: () => void } = $props();
@@ -40,8 +52,40 @@
   }
 
   const r = $derived(project.local);
-  const sessions = $derived(project.sessions.slice(0, 8));
-  const commits = $derived((showAllCommits ? project.commits : project.myCommits).slice(0, 15));
+
+  // ---- タブ ----
+  const tabs = $derived(
+    (
+      [
+        { id: "summary", label: "概要", show: true },
+        { id: "git", label: "git", show: project.kind !== "folder" },
+        { id: "commits", label: "コミット", count: project.myCommits.length, show: project.commits.length > 0 },
+        { id: "claude", label: "Claude", count: project.sessions.length, show: project.sessions.length > 0 },
+        { id: "readme", label: "README", show: !!project.path },
+      ] as { id: DetailTab; label: string; count?: number; show: boolean }[]
+    ).filter((t) => t.show),
+  );
+  // 最後に開いたタブを覚える。そのプロジェクトに無いタブなら概要
+  const tab = $derived(tabs.some((t) => t.id === prefs.detailTab) ? prefs.detailTab : "summary");
+
+  function selectTab(t: DetailTab) {
+    prefs.detailTab = t;
+    savePrefs();
+  }
+
+  // 一覧は多いときだけ「さらに表示」
+  let sessionLimit = $state(30);
+  let commitLimit = $state(50);
+  // 別のプロジェクトを選んだら元に戻す
+  $effect(() => {
+    void project.key;
+    sessionLimit = 30;
+    commitLimit = 50;
+  });
+  const sessions = $derived(project.sessions.slice(0, sessionLimit));
+  const commitSource = $derived(showAllCommits ? project.commits : project.myCommits);
+  const commits = $derived(commitSource.slice(0, commitLimit));
+  const webLink = $derived(project.links[0] ?? null);
 
 
   async function trust() {
@@ -88,7 +132,16 @@
     <ProjectActions {project} />
   </div>
 
+  <div class="tabs" role="tablist">
+    {#each tabs as t (t.id)}
+      <button role="tab" class="tab" class:on={tab === t.id} aria-selected={tab === t.id} onclick={() => selectTab(t.id)}>
+        {t.label}{#if t.count != null}<span class="count num">{t.count}</span>{/if}
+      </button>
+    {/each}
+  </div>
+
   <div class="body">
+    {#if tab === "summary"}
     <section>
       <h3>タグ</h3>
       {#if project.tags.length}
@@ -141,6 +194,16 @@
       </section>
     {/if}
 
+    <section>
+      {#if project.hidden}
+        <button onclick={() => setHidden(project.prefKey, false)}>表示に戻す</button>
+      {:else}
+        <button onclick={() => setHidden(project.prefKey, true)} title="状態タブの「非表示」で見られます。履歴・グラフ・日報には出なくなります">非表示にする</button>
+      {/if}
+    </section>
+    {/if}
+
+    {#if tab === "git"}
     {#if r && !r.error}
       <section>
         <h3>ブランチ</h3>
@@ -184,6 +247,7 @@
       </section>
     {/if}
 
+    {#if r?.error}<p class="muted small">git の状態を読めません。概要タブを見てください。</p>{/if}
     {#if project.kind !== "folder"}
       <section>
         <h3>リモート</h3>
@@ -202,9 +266,11 @@
       </section>
     {/if}
 
-    {#if sessions.length}
+    {/if}
+
+    {#if tab === "claude"}
       <section>
-        <h3>Claude のセッション <span class="muted small">{project.sessions.length} 件</span></h3>
+        <h3>Claude のセッション <span class="muted small">{project.sessions.length} 件 (新しい順)</span></h3>
         <ul class="sessions">
           {#each sessions as s (s.id)}
             <li class:auto={!s.interactive}>
@@ -226,10 +292,13 @@
             </li>
           {/each}
         </ul>
+        {#if project.sessions.length > sessions.length}
+          <button class="more" onclick={() => (sessionLimit += 30)}>さらに表示 (残り {project.sessions.length - sessions.length} 件)</button>
+        {/if}
       </section>
     {/if}
 
-    {#if project.commits.length}
+    {#if tab === "commits"}
       <section>
         <h3>
           最近のコミット
@@ -248,22 +317,21 @@
             <li class="muted small">自分のコミットはありません</li>
           {/each}
         </ul>
+        {#if commitSource.length > commits.length}
+          <button class="more" onclick={() => (commitLimit += 50)}>さらに表示 (残り {commitSource.length - commits.length} 件)</button>
+        {/if}
       </section>
     {/if}
 
-    <section>
-      {#if project.hidden}
-        <button onclick={() => setHidden(project.prefKey, false)}>表示に戻す</button>
-      {:else}
-        <button onclick={() => setHidden(project.prefKey, true)} title="状態タブの「非表示」で見られます。履歴・グラフ・日報には出なくなります">非表示にする</button>
-      {/if}
-    </section>
+    {#if tab === "readme" && project.path}
+      <ReadmeView path={project.path} link={webLink} />
+    {/if}
   </div>
 </aside>
 
 <style>
   .detail {
-    width: 440px;
+    width: 480px;
     flex: none;
     border-left: 1px solid var(--line);
     background: var(--surface);
@@ -293,6 +361,52 @@
   .path {
     font-size: 11.5px;
     word-break: break-all;
+  }
+
+  /* タブ: 選んでいるものは下線と太字で、はっきり分かるように */
+  .tabs {
+    display: flex;
+    gap: 2px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--line);
+    flex: none;
+  }
+
+  .tab {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    padding: 7px 10px 6px;
+    color: var(--muted);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .tab:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--ink);
+  }
+
+  .tab.on {
+    color: var(--ink);
+    font-weight: 600;
+    border-bottom-color: var(--accent);
+  }
+
+  .count {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--ink-2);
+    background: var(--surface-2);
+    border-radius: 999px;
+    padding: 0 6px;
+  }
+
+  .more {
+    margin-top: 8px;
   }
 
   .body {

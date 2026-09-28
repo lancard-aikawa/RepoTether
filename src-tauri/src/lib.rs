@@ -41,6 +41,59 @@ fn save_config(state: State<AppState>, mut config: Config) -> Result<Config, Str
     Ok(config.for_view())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Readme {
+    name: String,
+    content: String,
+    markdown: bool,
+    truncated: bool,
+}
+
+/// リポジトリ直下の README を読む。フォルダ直下の README という名前のファイルしか読まない。
+/// 日本語版 (README.ja.md など) があればそちらを先に使う。無ければ None
+#[tauri::command]
+fn read_readme(path: String) -> Result<Option<Readme>, String> {
+    const MAX: usize = 1024 * 1024;
+    const ORDER: &[&str] = &[
+        "readme.ja.md",
+        "readme_ja.md",
+        "readme.md",
+        "readme.markdown",
+        "readme.rst",
+        "readme.txt",
+        "readme",
+    ];
+    let dir = Path::new(&path);
+    if !dir.is_absolute() || !dir.is_dir() {
+        return Err(format!("フォルダではありません: {path}"));
+    }
+    let files: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .collect();
+    for want in ORDER {
+        let Some(f) = files
+            .iter()
+            .find(|f| f.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase() == *want))
+        else {
+            continue;
+        };
+        let bytes = std::fs::read(f).map_err(|e| e.to_string())?;
+        let truncated = bytes.len() > MAX;
+        let content = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX)]).into_owned();
+        return Ok(Some(Readme {
+            name: f.file_name().unwrap().to_string_lossy().into_owned(),
+            content,
+            markdown: want.ends_with(".md") || want.ends_with(".markdown"),
+            truncated,
+        }));
+    }
+    Ok(None)
+}
+
 /// OS の資格情報の保管庫 (Windows: 資格情報マネージャー / macOS: キーチェーンアクセス) を開く
 #[tauri::command]
 fn open_credential_manager() -> Result<(), String> {
@@ -202,8 +255,30 @@ pub fn run() {
             open_in,
             trust_repo,
             save_text_with_dialog,
-            open_credential_manager
+            open_credential_manager,
+            read_readme
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_this_repos_readme_only_by_name() {
+        // src-tauri の親 = RepoTether のリポジトリ直下
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let r = read_readme(root.to_string_lossy().into_owned()).unwrap().expect("README.md があるはず");
+        assert_eq!(r.name, "README.md");
+        assert!(r.markdown);
+        assert!(r.content.starts_with("# RepoTether"));
+
+        // README の無いフォルダは None、相対パスは拒否
+        assert!(read_readme(root.join("src-tauri").join("src").to_string_lossy().into_owned())
+            .unwrap()
+            .is_none());
+        assert!(read_readme("relative/path".into()).is_err());
+    }
 }

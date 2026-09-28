@@ -20,7 +20,11 @@ export const prefs = $state({
   stateView: "time" as StateViewMode,
   /** ツリーで畳んでいるノード ("folder:<id>" / "tag:<id>") */
   collapsed: [] as string[],
+  /** 詳細パネルで最後に開いたタブ */
+  detailTab: "summary" as DetailTab,
 });
+
+export type DetailTab = "summary" | "git" | "commits" | "claude" | "readme";
 
 export type StateViewMode = "time" | "folder" | "tag";
 

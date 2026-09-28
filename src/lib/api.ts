@@ -120,6 +120,46 @@ export async function saveTextWithDialog(defaultName: string, content: string): 
   return call("save_text_with_dialog", { defaultName, content });
 }
 
+export interface Readme {
+  name: string;
+  content: string;
+  markdown: boolean;
+  truncated: boolean;
+}
+
+/** リポジトリ直下の README。無ければ null */
+export async function readReadme(path: string): Promise<Readme | null> {
+  if (!inTauri) {
+    // ブラウザ表示ではファイルを読めないので、無害化の確認を兼ねた見本を返す
+    return {
+      name: "README.md (ブラウザ表示の見本)",
+      markdown: true,
+      truncated: false,
+      content: [
+        `# 見本の README`,
+        ``,
+        `${path} の README は、アプリで開くと表示されます。`,
+        ``,
+        `## 表`,
+        ``,
+        `| 項目 | 値 |`,
+        `|---|---|`,
+        `| a | \`code\` |`,
+        ``,
+        "```sh\npnpm install\n```",
+        ``,
+        `- [外部リンク](https://github.com/)`,
+        `- [相対リンク](docs/setup.md)`,
+        ``,
+        `<script>document.title = "XSS"</script>`,
+        `<img src="x" onerror="document.title='XSS'">`,
+        `<a href="javascript:document.title='XSS'">javascript リンク</a>`,
+      ].join("\n"),
+    };
+  }
+  return call("read_readme", { path });
+}
+
 /** フォルダ選択ダイアログ。キャンセルなら null */
 export async function pickFolder(title: string, defaultPath?: string): Promise<string | null> {
   if (!inTauri) return window.prompt(title, defaultPath ?? "") || null;
