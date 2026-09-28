@@ -76,6 +76,15 @@ export interface Session {
   gitBranch: string | null;
 }
 
+/** セッションの会話の 1 件 (全文を見る) */
+export interface TranscriptEntry {
+  role: "user" | "assistant";
+  at: string | null;
+  text: string;
+  /** Claude が使ったツールの名前 */
+  tools: string[];
+}
+
 export interface RemoteRepo {
   accountId: string;
   key: string;

@@ -2,7 +2,7 @@
   import type { HistoryItem, Project } from "$lib/derive";
   import { historyItems } from "$lib/derive";
   import { addDays, dayKey, formatDayLong, formatTime, searchKey, startOfDay } from "$lib/format";
-  import { prefs, savePrefs } from "$lib/store.svelte";
+  import { openTranscript, prefs, resumeSession, savePrefs } from "$lib/store.svelte";
 
   let { projects }: { projects: Project[] } = $props();
 
@@ -116,7 +116,14 @@
                   {:else}
                     <span class="kind claude">Claude</span>
                     <span class="text">
-                      <span>{i.session.title ?? i.session.firstPrompt ?? "(無題)"}</span>
+                      <button class="s-title" onclick={() => openTranscript(i.session)} title="会話の全文を見る"
+                        >{i.session.title ?? i.session.firstPrompt ?? "(無題)"}</button
+                      >
+                      {#if i.session.interactive && i.session.cwd}
+                        <button class="resume" onclick={() => resumeSession(i.session, false)} title="端末で claude -r を実行して続ける"
+                          >再開</button
+                        >
+                      {/if}
                       {#if i.prompts}<span class="muted small"> プロンプト {i.prompts} 回</span>{/if}
                       {#if !i.session.interactive}<span class="muted small"> (自動)</span>{/if}
                       {#if i.session.lastPrompt}
@@ -219,6 +226,33 @@
 
   .text {
     min-width: 0;
+  }
+
+  .s-title {
+    border: none;
+    background: transparent;
+    padding: 0;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .s-title:hover:not(:disabled) {
+    background: transparent;
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  /* 再開はカーソルを乗せた行だけ */
+  .resume {
+    font-size: 11.5px;
+    padding: 0 8px;
+    margin-left: 6px;
+    visibility: hidden;
+  }
+
+  li:hover .resume,
+  li:focus-within .resume {
+    visibility: visible;
   }
 
   .sub {

@@ -9,6 +9,7 @@
   import GraphView from "$lib/components/GraphView.svelte";
   import ReportView from "$lib/components/ReportView.svelte";
   import SettingsView from "$lib/components/SettingsView.svelte";
+  import SessionTranscript from "$lib/components/SessionTranscript.svelte";
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "state", label: "状態" },
@@ -114,6 +115,10 @@
       <SettingsView {projects} />
     {/if}
   </main>
+
+  {#if app.openSession}
+    <SessionTranscript session={app.openSession} onclose={() => (app.openSession = null)} />
+  {/if}
 
   {#if app.toast}
     <div class="toast" role="status">

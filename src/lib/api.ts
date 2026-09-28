@@ -2,7 +2,7 @@
 // ブラウザで `pnpm dev` だけを開いたとき (Tauri の外) は、static/dev-snapshot.json を読む表示確認用のモードになる。
 // dev-snapshot.json は `cargo run --example dump -- ../static/dev-snapshot.json` で作る (git には入れない)。
 
-import type { Commit, Config, Snapshot } from "./types";
+import type { Commit, Config, Snapshot, TranscriptEntry } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -55,6 +55,7 @@ type MockHooks = {
   __mockReadme?: Record<string, string>;
   __noReadme?: string[];
   __mockGhUser?: string;
+  __mockTranscript?: TranscriptEntry[];
 };
 const hooks = () => (typeof window === "undefined" ? {} : (window as unknown as MockHooks));
 
@@ -134,6 +135,31 @@ export async function repoLog(path: string, skip: number, limit: number, mineOnl
     });
   }
   return call("repo_log", { path, skip, limit, mineOnly });
+}
+
+/** そのフォルダで claude を起動する (選んだ端末で) */
+export async function claudeOpen(path: string, terminal = ""): Promise<void> {
+  if (!inTauri) throw new Error("ブラウザ表示では開けません");
+  return call("claude_open", { path, terminal });
+}
+
+/** セッションを再開する (claude -r)。fork なら元の会話を残して別の会話として続ける */
+export async function claudeResume(cwd: string, sessionId: string, fork: boolean, terminal = ""): Promise<void> {
+  if (!inTauri) throw new Error("ブラウザ表示では再開できません");
+  return call("claude_resume", { cwd, sessionId, fork, terminal });
+}
+
+/** セッションの会話の全文 */
+export async function sessionTranscript(sessionId: string): Promise<TranscriptEntry[]> {
+  if (!inTauri) {
+    const given = hooks().__mockTranscript;
+    if (given) return given;
+    return [
+      { role: "user", at: new Date().toISOString(), text: "ブラウザ表示では、会話の全文の代わりに見本を出します", tools: [] },
+      { role: "assistant", at: new Date().toISOString(), text: "**見本**の返答です。\n\n- 箇条書き\n- `code`", tools: ["Read", "Edit"] },
+    ];
+  }
+  return call("session_transcript", { sessionId });
 }
 
 export interface TerminalChoice {

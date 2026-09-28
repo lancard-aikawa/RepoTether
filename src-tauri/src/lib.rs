@@ -115,6 +115,53 @@ async fn repo_log(
         .map_err(|e| e.to_string())?
 }
 
+fn existing_dir(path: &str) -> Result<PathBuf, String> {
+    let p = PathBuf::from(util::display_path(path));
+    if !p.is_absolute() || !p.is_dir() {
+        return Err(format!("フォルダがありません: {path}"));
+    }
+    Ok(p)
+}
+
+/// そのフォルダで claude を起動する (選んだ端末で)
+#[tauri::command]
+fn claude_open(path: String, terminal: Option<String>) -> Result<(), String> {
+    let dir = existing_dir(&path)?;
+    launch::terminal_run(&dir, terminal.as_deref().unwrap_or(""), "claude", &[])
+}
+
+/// セッションを再開する (`claude -r <ID>`)。fork なら元の会話を残して別の会話として続ける (`--fork-session`)。
+/// Claude Code はセッションを始めたフォルダごとに記録するので、cwd はそのセッションのフォルダ
+#[tauri::command]
+fn claude_resume(cwd: String, session_id: String, fork: bool, terminal: Option<String>) -> Result<(), String> {
+    if !core::sessions::is_session_id(&session_id) {
+        return Err(format!("セッション ID の形ではありません: {session_id}"));
+    }
+    let dir = existing_dir(&cwd)?;
+    let mut args = vec!["-r", session_id.as_str()];
+    if fork {
+        args.push("--fork-session");
+    }
+    launch::terminal_run(&dir, terminal.as_deref().unwrap_or(""), "claude", &args)
+}
+
+/// セッションの会話の全文
+#[tauri::command]
+async fn session_transcript(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<core::model::TranscriptEntry>, String> {
+    let dir = state
+        .config
+        .lock()
+        .unwrap()
+        .claude_projects_dir()
+        .ok_or("Claude のログの場所が分かりません")?;
+    tauri::async_runtime::spawn_blocking(move || core::sessions::transcript(&dir, &session_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// この PC で選べる端末
 #[tauri::command]
 fn list_terminals() -> Vec<launch::TerminalChoice> {
@@ -294,7 +341,10 @@ pub fn run() {
             read_readme,
             check_gh,
             list_terminals,
-            repo_log
+            repo_log,
+            claude_open,
+            claude_resume,
+            session_transcript
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

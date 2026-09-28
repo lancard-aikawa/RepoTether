@@ -33,14 +33,41 @@ fn spawn(cmd: &mut Command) -> Result<(), String> {
 /// RepoTether 自体を VS Code (の拡張やターミナル) から起動すると、VS Code 内部用の環境変数を引き継ぐ。
 /// 特に ELECTRON_RUN_AS_NODE=1 が残っていると Code.exe が Node として動いて窓が開かないので、
 /// 外部アプリには渡さない。
+///
+/// Claude Code の中から起動した場合も、動いているセッションを指す環境変数 (CLAUDECODE など) を渡さない。
+/// そのまま渡すと、起動した claude が「Claude Code の中」だと取り違える。利用者が自分で決める設定
+/// (CLAUDE_CONFIG_DIR など) は残す。
 fn clean_env(cmd: &mut Command) -> &mut Command {
+    const CLAUDE_SESSION_VARS: &[&str] = &[
+        "CLAUDECODE",
+        "CLAUDE_PID",
+        "CLAUDE_EFFORT",
+        "CLAUDE_CODE_SESSION_ID",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "CLAUDE_CODE_ENTRYPOINT",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+        "CLAUDE_CODE_SESSION_ATTENDED",
+        "CLAUDE_CODE_ENABLE_TASKS",
+        "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
+        "CLAUDE_AGENT_SDK_VERSION",
+    ];
     for (k, _) in std::env::vars_os() {
         let k = k.to_string_lossy();
-        if k.starts_with("ELECTRON_") || k.starts_with("VSCODE_") {
+        if k.starts_with("ELECTRON_") || k.starts_with("VSCODE_") || CLAUDE_SESSION_VARS.contains(&k.as_ref()) {
             cmd.env_remove(k.as_ref());
         }
     }
     cmd
+}
+
+/// 端末に渡してよい引数か (英数字・ハイフンだけ)。シェルを通すので、それ以外は通さない
+fn safe_args(args: &[&str]) -> Result<String, String> {
+    for a in args {
+        if a.is_empty() || !a.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(format!("端末に渡せない引数です: {a}"));
+        }
+    }
+    Ok(args.join(" "))
 }
 
 #[cfg(windows)]
@@ -130,6 +157,46 @@ mod windows {
         }
     }
 
+    /// 選んだ端末で dir を開き、その中でコマンドを動かす (終わっても窓は残す)。
+    /// program と args は safe_args を通った英数字・ハイフンだけ
+    pub fn terminal_run(dir: &Path, kind: &str, program: &str, args: &[&str]) -> Result<(), String> {
+        let line = safe_args(&[&[program][..], args].concat())?;
+        match kind {
+            "" | "wt" => {
+                let mut wt = Command::new("wt.exe");
+                wt.arg("-d").arg(dir).args(["cmd", "/K", &line]);
+                if clean_env(&mut wt).spawn().is_ok() {
+                    return Ok(());
+                }
+                if kind == "wt" {
+                    return Err("Windows Terminal を起動できません".into());
+                }
+                console("cmd.exe", &["/K", &line], dir)
+            }
+            "pwsh" => console("pwsh.exe", &["-NoExit", "-Command", &line], dir),
+            "powershell" => console("powershell.exe", &["-NoExit", "-Command", &line], dir),
+            "cmd" => console("cmd.exe", &["/K", &line], dir),
+            "gitbash" => {
+                let bash = git_bash()
+                    .and_then(|g| g.parent().map(|p| p.join("bin").join("bash.exe")))
+                    .filter(|b| b.is_file())
+                    .ok_or("Git Bash が見つかりません")?;
+                let script = format!("{line}; exec bash -i");
+                spawn(
+                    Command::new(bash)
+                        .args(["--login", "-c", &script])
+                        .current_dir(dir)
+                        // /etc/profile がホームへ移動しないように
+                        .env("CHERE_INVOKING", "1")
+                        .creation_flags(CREATE_NEW_CONSOLE),
+                )
+            }
+            // WSL の中の claude は Windows 側のセッションを知らないので、コマンドプロンプトで動かす
+            "wsl" => console("cmd.exe", &["/K", &line], dir),
+            k => Err(format!("未対応の端末です: {k}")),
+        }
+    }
+
     pub fn folder(dir: &Path) -> Result<(), String> {
         spawn(Command::new("explorer.exe").arg(dir))
     }
@@ -193,6 +260,26 @@ mod macos {
         }
     }
 
+    /// ターミナルの新しいウィンドウで dir に移動してコマンドを動かす (iTerm を選んでいてもターミナルで)
+    pub fn terminal_run(dir: &Path, _kind: &str, program: &str, args: &[&str]) -> Result<(), String> {
+        let line = safe_args(&[&[program][..], args].concat())?;
+        let out = clean_env(
+            Command::new("osascript")
+                .args(["-e", "on run argv"])
+                .args(["-e", "tell application \"Terminal\" to do script \"cd \" & quoted form of item 1 of argv & \" && \" & item 2 of argv"])
+                .args(["-e", "tell application \"Terminal\" to activate"])
+                .args(["-e", "end run"])
+                .arg(dir)
+                .arg(&line),
+        )
+        .output()
+        .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(format!("ターミナルを開けません: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        Ok(())
+    }
+
     pub fn folder(dir: &Path) -> Result<(), String> {
         spawn(Command::new("open").arg(dir))
     }
@@ -215,6 +302,10 @@ mod other {
     }
 
     pub fn terminal(_dir: &Path, _kind: &str) -> Result<(), String> {
+        Err("この OS では端末を開けません".into())
+    }
+
+    pub fn terminal_run(_dir: &Path, _kind: &str, _program: &str, _args: &[&str]) -> Result<(), String> {
         Err("この OS では端末を開けません".into())
     }
 
@@ -257,5 +348,18 @@ mod terminal_tests {
         assert!(ids.contains(&"powershell") && ids.contains(&"cmd"));
         // 決まった種類以外は開かない
         assert!(terminal(std::path::Path::new("C:\\"), "calc").is_err());
+    }
+}
+
+#[cfg(test)]
+mod safe_args_tests {
+    use super::*;
+
+    #[test]
+    fn only_plain_tokens_reach_the_shell() {
+        assert_eq!(safe_args(&["claude", "-r", "4100683c-53d0", "--fork-session"]).unwrap(), "claude -r 4100683c-53d0 --fork-session");
+        assert!(safe_args(&["claude", "&", "calc"]).is_err());
+        assert!(safe_args(&["claude", "a;b"]).is_err());
+        assert!(safe_args(&["claude", ""]).is_err());
     }
 }

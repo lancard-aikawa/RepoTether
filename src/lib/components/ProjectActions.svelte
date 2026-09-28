@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Project } from "$lib/derive";
   import * as api from "$lib/api";
-  import { errorText, prefs, toast } from "$lib/store.svelte";
+  import { errorText, openClaude, prefs, toast } from "$lib/store.svelte";
   import CloneDialog from "./CloneDialog.svelte";
 
   let { project, compact = false }: { project: Project; compact?: boolean } = $props();
@@ -23,6 +23,7 @@
     <button onclick={() => open("vscode")} title="VS Code で開く">VS Code</button>
     <button onclick={() => open("terminal")} title="ターミナルを開く">端末</button>
     <button onclick={() => open("explorer")} title="エクスプローラーで開く">フォルダ</button>
+    <button onclick={() => openClaude(project.path!)} title="このフォルダで claude を起動する (設定の端末で)">Claude</button>
   {/if}
   {#if project.kind === "remote"}
     <button class="primary" onclick={() => (cloning = true)}>クローン</button>

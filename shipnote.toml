@@ -1,0 +1,34 @@
+# Shipnote の設定。Pages の LP (/projects/<slug>/) に出す内容。
+# 書き換えたら `shipnote sync` で反映する。
+
+name = "RepoTether"
+github = "lancard-aikawa/RepoTether"
+# slug = "repotether"   # LP の URL。省略すると name から作る
+
+# 一行の紹介 (トップの一覧と LP の見出し下に出る)
+tagline = "登録ゼロで、全リポジトリの取り残しと Claude との作業の続きが一目で分かる"
+
+# 二〜四文の説明
+description = "ローカルの git リポジトリ、Claude Code のセッション、GitHub / Gogs / Gitea のリポジトリ一覧をまとめて見る、個人用の Windows デスクトップアプリです。プロジェクトを手で登録する必要はなく、探すフォルダとアカウントを決めれば、あとは自動で集まります。未コミット・未 push・未マージのブランチといった取り残しと、いつ何をやったか、どこに時間を使っているかを 1 つの画面で確認できます。リポジトリは読むだけで、書き込むのはクローンや git fetch を自分で操作したときだけです。"
+
+features = [
+  "状態タブで、プロジェクトごとの取り残しと Claude / git / 変更の時刻、直前の Claude セッションを一覧できる",
+  "時系列 / フォルダ / 自分で付けるタグ (3 階層) で並べ替え、スター・絞り込み・詳細パネルで絞り込める",
+  "コミットと Claude セッションを日ごとに並べる履歴と、カレンダー・週ごとの棒・プロジェクト × 週などのグラフ",
+  "日報 / 週報の Markdown をプレビューを見ながら手直しし、コピー・保存できる",
+  "GitHub (GitHub CLI のログインを借用可) / Gogs / Gitea の一覧と照合し、未クローンのものをクローンできる",
+]
+
+# 動く環境 (例: "Windows 10 / 11")
+platforms = "Windows 10 / 11 (64 bit)。WebView2 と Git for Windows が必要"
+
+# リポジトリ内の画像のパス。LP に並ぶ
+screenshots = [
+  "docs/images/01_state_time.png",
+  "docs/images/10_history.png",
+  "docs/images/11_graph.png",
+  "docs/images/12_report.png",
+]
+
+# false にするとトップの一覧から外す (LP とリリース記録は作る)
+listed = true

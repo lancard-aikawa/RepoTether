@@ -1,7 +1,7 @@
 // アプリ全体の状態。設定・取り込み結果・更新中の表示。
 
 import * as api from "./api";
-import type { Config, Snapshot } from "./types";
+import type { Config, Session, Snapshot } from "./types";
 import * as tags_ from "./tags";
 
 export const app = $state({
@@ -13,6 +13,8 @@ export const app = $state({
   toast: "",
   /** トーストに付けるボタン (元に戻す など) */
   toastAction: null as { label: string; run: () => void } | null,
+  /** 全文を開いているセッション */
+  openSession: null as Session | null,
 });
 
 /** 画面の好み (その端末だけ)。失われても困らないものだけ置く */
@@ -111,6 +113,33 @@ export function toastUndo(msg: string, prev: Config | undefined) {
 
 export function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+// ---- Claude ----
+
+/** セッションの会話の全文を開く */
+export function openTranscript(s: Session) {
+  app.openSession = s;
+}
+
+/** セッションを再開する (選んだ端末で claude -r)。fork なら元の会話を残す */
+export async function resumeSession(s: Session, fork: boolean) {
+  if (!s.cwd) return toast("このセッションのフォルダが分かりません");
+  try {
+    await api.claudeResume(s.cwd, s.id, fork, prefs.terminal);
+    toast(fork ? "分岐して再開しました (端末を見てください)" : "再開しました (端末を見てください)");
+  } catch (e) {
+    toast(errorText(e));
+  }
+}
+
+/** そのフォルダで claude を起動する */
+export async function openClaude(path: string) {
+  try {
+    await api.claudeOpen(path, prefs.terminal);
+  } catch (e) {
+    toast(errorText(e));
+  }
 }
 
 /** リモートの一覧を取るアカウントがあるか */

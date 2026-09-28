@@ -117,6 +117,18 @@ pub struct Session {
     pub git_branch: Option<String>,
 }
 
+/// セッションの会話の 1 件 (詳細の「全文を見る」)。Claude の返答は、続けて届いた記録を 1 件にまとめる
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptEntry {
+    /// "user" / "assistant"
+    pub role: String,
+    pub at: Option<String>,
+    pub text: String,
+    /// Claude が使ったツールの名前 (Bash / Edit など)。同じ名前が続けば 1 つにまとめる
+    pub tools: Vec<String>,
+}
+
 /// GitHub / Gogs / Gitea のリモートにあるリポジトリ。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

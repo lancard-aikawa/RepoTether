@@ -15,6 +15,8 @@
     setHidden,
     setTags,
     toast,
+    openTranscript,
+    resumeSession,
     type DetailTab,
   } from "$lib/store.svelte";
   import ProjectActions from "./ProjectActions.svelte";
@@ -359,8 +361,14 @@
           {#each sessions as s (s.id)}
             <li class:auto={!s.interactive}>
               <div class="s-head">
-                <strong>{s.title ?? "(無題)"}</strong>
+                <button class="s-title" onclick={() => openTranscript(s)} title="会話の全文を見る">{s.title ?? "(無題)"}</button>
                 {#if !s.interactive}<span class="host">自動</span>{/if}
+                <span class="s-actions">
+                  <button class="small-btn" onclick={() => openTranscript(s)}>全文</button>
+                  {#if s.interactive && s.cwd}
+                    <button class="small-btn" onclick={() => resumeSession(s, false)} title="端末で claude -r を実行して続ける">再開</button>
+                  {/if}
+                </span>
               </div>
               <div class="muted small">
                 {sessionSpan(s.startedAt, s.endedAt)} / プロンプト {s.promptCount} 回
@@ -604,6 +612,34 @@
     display: flex;
     gap: 6px;
     align-items: baseline;
+  }
+
+  /* タイトルを押すと全文。見た目はリンク風の太字 */
+  .s-title {
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-weight: 600;
+    text-align: left;
+    white-space: normal;
+  }
+
+  .s-title:hover:not(:disabled) {
+    background: transparent;
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  .s-actions {
+    margin-left: auto;
+    display: inline-flex;
+    gap: 4px;
+    flex: none;
+  }
+
+  .small-btn {
+    font-size: 12px;
+    padding: 1px 8px;
   }
 
   .host {

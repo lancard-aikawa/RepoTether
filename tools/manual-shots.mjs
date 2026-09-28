@@ -185,6 +185,25 @@ const README = {
   ].join("\n"),
 };
 
+// 会話の全文の見本 (photo-organizer の直前のセッション)
+const TRANSCRIPT = [
+  { role: "user", text: "EXIF の撮影日で年月フォルダに振り分けたい" },
+  { role: "assistant", text: "今の振り分けの処理を読みます。", tools: ["Glob", "Read"] },
+  {
+    role: "assistant",
+    text: [
+      "`organize.py` はファイルの更新日時で振り分けています。撮影日 (EXIF の `DateTimeOriginal`) を優先し、無いときだけ更新日時を使うようにします。",
+      "",
+      "1. EXIF を読む関数を足す",
+      "2. 振り分け先を `YYYY/MM` にする",
+      "3. `--dry-run` で確かめられるようにする",
+    ].join("\n"),
+    tools: ["Edit", "Bash"],
+  },
+  { role: "user", text: "重複した写真の扱いは?" },
+  { role: "assistant", text: "同じハッシュのものは「重複」フォルダへ移すようにしました。`--dedupe` で有効になります。", tools: ["Edit", "Bash"] },
+];
+
 // ---- 取り込み結果を作る ----
 function buildSnapshot() {
   const repos = [];
@@ -423,6 +442,10 @@ function stopServer(child) {
 async function main() {
   mkdirSync(OUT, { recursive: true });
   const snapshot = buildSnapshot();
+  // 全文の見本の時刻を、photo-organizer の直前のセッションの時刻に合わせる
+  const demoSession = snapshot.sessions.find((x) => x.id === "demo-photo-organizer-0");
+  const start = Date.parse(demoSession.startedAt);
+  const transcriptTimes = TRANSCRIPT.map((_, i) => new Date(start + i * 4 * 60000).toISOString());
   const config = buildConfig();
   const server = await ensureServer();
   const browser = await chromium.launch({ channel: "msedge" });
@@ -432,16 +455,22 @@ async function main() {
       page.setDefaultTimeout(8000);
       await page.route("**/dev-snapshot.json", (route) => route.fulfill({ json: snapshot }));
       await page.addInitScript(
-        ({ config, readme, prefs }) => {
+        ({ config, readme, prefs, transcript }) => {
           window.__mockConfig = config;
           window.__mockGhUser = "demo-user";
+          window.__mockTranscript = transcript;
           window.__mockReadme = readme;
           localStorage.setItem(
             "repotether.prefs",
             JSON.stringify({ tab: "state", stateView: "time", theme: "system", density: "normal", autoLocalMin: 0, autoRemoteMin: 0, ...prefs }),
           );
         },
-        { config, readme: README, prefs },
+        {
+          config,
+          readme: README,
+          prefs,
+          transcript: TRANSCRIPT.map((e, i) => ({ at: transcriptTimes[i], tools: [], ...e })),
+        },
       );
       await page.goto(URL_BASE);
       // マニュアルには「ブラウザ表示」の印を出さない
@@ -474,6 +503,12 @@ async function main() {
     await shot(page, "06_detail_claude.png");
     await page.locator(".detail .tab", { hasText: "README" }).click();
     await shot(page, "07_detail_readme.png");
+    // 会話の全文
+    await page.locator(".detail .tab", { hasText: "Claude" }).click();
+    await page.locator(".detail .s-actions button", { hasText: "全文" }).first().click();
+    await page.waitForSelector(".entry");
+    await shot(page, "18_transcript.png");
+    await page.keyboard.press("Escape");
     await page.close();
 
     page = await open({ stateView: "folder" });
