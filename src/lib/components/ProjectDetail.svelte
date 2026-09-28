@@ -100,7 +100,7 @@
     (
       [
         { id: "summary", label: "概要", show: true },
-        { id: "git", label: "git", show: project.kind !== "folder" },
+        { id: "git", label: "リポジトリ", show: project.kind !== "folder" },
         {
           id: "commits",
           label: "コミット",
