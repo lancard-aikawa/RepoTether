@@ -13,6 +13,8 @@ export interface RemoteLink {
   remoteName: string | null;
   /** git の URL (clone / fetch に使うもの) */
   url: string;
+  /** 「所有者/リポジトリ名」。URL が長いので、一覧ではこれを出す (大文字小文字は URL のまま) */
+  path: string;
   /** ブラウザで開く URL。作れなければ null */
   webUrl: string | null;
 }
@@ -47,6 +49,26 @@ export function kindOf(host: string, cfg: Config | null): { kind: RemoteKind; la
   return { kind: "other", label: host };
 }
 
+/**
+ * git の URL から「所有者/リポジトリ名」を取り出す。大文字小文字は元のまま。
+ * https / ssh:// / scp 形式 (git@host:owner/name.git) に対応し、末尾 2 階層を使う
+ */
+export function repoPathOf(url: string): string {
+  let path = url.trim();
+  const scheme = path.match(/^[a-z][a-z0-9+.-]*:\/\/[^/]+\/(.*)$/i);
+  if (scheme) path = scheme[1];
+  else {
+    // user@host:owner/name。C:\repos\x のようなドライブ文字 (1 文字 + :) は除く
+    const scp = path.match(/^[^/\\:]+:(.+)$/);
+    if (scp && !/^[a-z]:/i.test(path)) path = scp[1];
+  }
+  const segs = path
+    .replace(/\.git\/?$/, "")
+    .split(/[\\/]/)
+    .filter(Boolean);
+  return segs.length >= 2 ? segs.slice(-2).join("/") : segs.join("/") || url;
+}
+
 /** git の URL からブラウザ用の URL を作る */
 export function webUrlOf(url: string, key: string | null): string | null {
   // Backlog の git は <space>.git.backlog.jp、Web は <space>.backlog.jp/git/<project>/<repo>
@@ -76,6 +98,7 @@ export function linksOfLocal(repo: LocalRepo, matched: RemoteRepo[], cfg: Config
       host,
       remoteName: r.name,
       url: r.url,
+      path: known?.fullName || repoPathOf(r.url),
       webUrl: known?.htmlUrl ?? webUrlOf(r.url, r.key),
     });
   }
@@ -92,6 +115,7 @@ export function linkOfRemote(r: RemoteRepo, cfg: Config | null): RemoteLink {
     host,
     remoteName: null,
     url: r.cloneUrl ?? r.sshUrl ?? `https://${r.key}`,
+    path: r.fullName || repoPathOf(r.cloneUrl ?? r.key),
     webUrl: r.htmlUrl ?? `https://${r.key}`,
   };
 }

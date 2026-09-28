@@ -5,12 +5,12 @@
 
   let {
     links,
-    showUrl = false,
+    showPath = true,
     showNone = true,
   }: {
     links: RemoteLink[];
-    /** URL を横に並べる (詳細パネル用)。false なら URL はマウスを乗せたときに出す */
-    showUrl?: boolean;
+    /** 「所有者/リポジトリ名」を横に出す。完全な URL はマウスを乗せたときに出す */
+    showPath?: boolean;
     /** リモートが無いとき「なし」を出す */
     showNone?: boolean;
   } = $props();
@@ -69,7 +69,7 @@
           <span class="rname">{l.remoteName}</span>
         {/if}
       </span>
-      {#if showUrl}<span class="url mono" title={l.url}>{l.url}</span>{/if}
+      {#if showPath}<span class="rpath" title={tip(l)}>{l.path}</span>{/if}
       {#if l.webUrl}
         <button
           class="open"
@@ -167,13 +167,14 @@
     stroke-linejoin: round;
   }
 
-  .url {
-    font-size: 11.5px;
+  .rpath {
+    font-size: 12px;
     color: var(--ink-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+    max-width: 260px;
   }
 
   .open {

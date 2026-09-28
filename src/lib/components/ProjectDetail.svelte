@@ -292,7 +292,7 @@
       <section>
         <h3>リモート</h3>
         <div class="remotes">
-          <RemoteBadges links={project.links} showUrl />
+          <RemoteBadges links={project.links} />
         </div>
         {#each project.remotes as rr (rr.key)}
           <p class="small muted">
