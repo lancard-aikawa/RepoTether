@@ -4,7 +4,8 @@
   import { buildReport } from "$lib/report";
   import { addDays, dayKey, parseDayKey, startOfDay } from "$lib/format";
   import * as api from "$lib/api";
-  import { errorText, prefs, toast } from "$lib/store.svelte";
+  import { errorText, prefs, savePrefs, toast, type ReportViewMode } from "$lib/store.svelte";
+  import Markdown from "./Markdown.svelte";
 
   let { projects }: { projects: Project[] } = $props();
 
@@ -65,6 +66,17 @@
     }
   }
 
+  const viewModes: { id: ReportViewMode; label: string }[] = [
+    { id: "edit", label: "編集" },
+    { id: "split", label: "並べて表示" },
+    { id: "preview", label: "プレビュー" },
+  ];
+
+  function setViewMode(m: ReportViewMode) {
+    prefs.reportView = m;
+    savePrefs();
+  }
+
   const isToday = $derived(day === dayKey(startOfDay(Date.now())));
 </script>
 
@@ -81,14 +93,26 @@
     <label class="check"><input type="checkbox" bind:checked={includeLeftovers} /> 残っていること</label>
     <label class="check"><input type="checkbox" bind:checked={includeReplies} /> Claude の最後の返答</label>
     <span class="spacer"></span>
+    <div class="segmented" role="group" aria-label="表示">
+      {#each viewModes as m (m.id)}
+        <button class:on={prefs.reportView === m.id} onclick={() => setViewMode(m.id)}>{m.label}</button>
+      {/each}
+    </div>
     {#if edited}
       <button class="ghost" onclick={() => ((text = generated), (edited = false))}>作り直す</button>
     {/if}
     <button onclick={copy}>コピー</button>
     <button class="primary" onclick={save}>保存</button>
   </div>
-  <div class="editor">
-    <textarea bind:value={text} oninput={() => (edited = true)} spellcheck="false" aria-label="日報の本文"></textarea>
+  <div class="editor" class:split={prefs.reportView === "split"}>
+    {#if prefs.reportView !== "preview"}
+      <textarea bind:value={text} oninput={() => (edited = true)} spellcheck="false" aria-label="日報の本文"></textarea>
+    {/if}
+    {#if prefs.reportView !== "edit"}
+      <div class="preview panel" aria-label="プレビュー">
+        <Markdown source={text} />
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -114,15 +138,31 @@
     min-height: 0;
     padding: 12px 16px 16px;
     display: flex;
+    gap: 12px;
   }
 
   textarea {
     flex: 1;
+    min-width: 0;
     resize: none;
     font-family: var(--mono);
     font-size: 13px;
     line-height: 1.6;
     padding: 12px 14px;
     max-width: 980px;
+  }
+
+  .preview {
+    flex: 1;
+    min-width: 0;
+    max-width: 980px;
+    overflow-y: auto;
+    padding: 14px 20px;
+  }
+
+  /* 並べて表示では左右を同じ幅に */
+  .split textarea,
+  .split .preview {
+    flex: 1 1 0;
   }
 </style>

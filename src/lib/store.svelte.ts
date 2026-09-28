@@ -23,7 +23,11 @@ export const prefs = $state({
   collapsed: [] as string[],
   /** 詳細パネルで最後に開いたタブ */
   detailTab: "summary" as DetailTab,
+  /** 日報の表示: 編集 / 並べて表示 / プレビュー */
+  reportView: "split" as ReportViewMode,
 });
+
+export type ReportViewMode = "edit" | "split" | "preview";
 
 export type DetailTab = "summary" | "git" | "commits" | "claude" | "readme";
 
