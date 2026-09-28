@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { app, prefs, init, refresh, savePrefs, type Tab } from "$lib/store.svelte";
+  import { app, prefs, init, refresh, savePrefs, startAutoRefresh, type Tab } from "$lib/store.svelte";
   import { buildProjects } from "$lib/derive";
   import { inTauri } from "$lib/api";
   import { relative, toMs } from "$lib/format";
@@ -31,8 +31,12 @@
 
   onMount(() => {
     init();
+    const stopAuto = startAutoRefresh();
     const t = setInterval(() => (now = Date.now()), 60000);
-    return () => clearInterval(t);
+    return () => {
+      clearInterval(t);
+      stopAuto();
+    };
   });
 
   function selectTab(t: Tab) {
@@ -60,8 +64,13 @@
         <span class="spinner" aria-hidden="true"></span>
         <span>{app.progress}</span>
       {:else if app.snapshot}
-        <span class="muted" title={app.snapshot.generatedAt}
-          >更新 {relative(toMs(app.snapshot.generatedAt), now)}</span
+        <span
+          class="muted"
+          title="ローカル: {app.snapshot.generatedAt}{app.snapshot.remoteFetchedAt
+            ? `\nリモート: ${app.snapshot.remoteFetchedAt}`
+            : ''}"
+          >更新 {relative(toMs(app.snapshot.generatedAt), now)}{#if app.snapshot.remoteFetchedAt}
+            / リモート {relative(toMs(app.snapshot.remoteFetchedAt), now)}{/if}</span
         >
       {/if}
       {#if !inTauri}<span class="badge info">ブラウザ表示 (読み取りのみ)</span>{/if}

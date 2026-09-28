@@ -29,6 +29,9 @@ export const prefs = $state({
   reportView: "split" as ReportViewMode,
   /** 未クローンのフォーク・アーカイブを状態タブで隠す */
   hideForkArchived: false,
+  /** 自動更新の間隔 (分)。0 はしない。ローカル = リポジトリ・コミット・セッション、リモート = GitHub / Gogs の一覧 */
+  autoLocalMin: 15,
+  autoRemoteMin: 60,
   /** テーマ: OS に合わせる / ライト / ダーク */
   theme: "system" as Theme,
   /** 設定で最後に開いたタブ */
@@ -101,6 +104,33 @@ export function toastUndo(msg: string, prev: Config | undefined) {
 
 export function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** リモートの一覧を取るアカウントがあるか */
+export function hasRemoteAccounts(): boolean {
+  return !!app.config?.accounts.some((a) => a.enabled);
+}
+
+/**
+ * 自動更新。前回の更新 (取り込み結果に残る時刻) から間隔が過ぎていれば、裏で読み直す。
+ * ウィンドウが見えていないあいだはしない (見えたときに、過ぎていればすぐ更新する)
+ */
+export function startAutoRefresh(): () => void {
+  const check = () => {
+    if (app.busy || document.hidden || !app.snapshot) return;
+    const now = Date.now();
+    const due = (min: number, at: string | null | undefined) =>
+      min > 0 && (!at || now - Date.parse(at) >= min * 60000);
+    // リモートを取るときはローカルも一緒に読み直すので、先に見る
+    if (hasRemoteAccounts() && due(prefs.autoRemoteMin, app.snapshot.remoteFetchedAt)) refresh(true);
+    else if (due(prefs.autoLocalMin, app.snapshot.generatedAt)) refresh(false);
+  };
+  const timer = setInterval(check, 30000);
+  document.addEventListener("visibilitychange", check);
+  return () => {
+    clearInterval(timer);
+    document.removeEventListener("visibilitychange", check);
+  };
 }
 
 /** 起動時: キャッシュをすぐ表示し、裏でローカルを読み直す */

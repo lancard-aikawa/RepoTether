@@ -176,6 +176,11 @@
     { id: "dark", label: "ダーク" },
   ];
 
+  function setAuto(k: "autoLocalMin" | "autoRemoteMin", v: number) {
+    prefs[k] = v;
+    savePrefs();
+  }
+
   function setTheme(t: Theme) {
     prefs.theme = t;
     savePrefs();
@@ -413,6 +418,28 @@
           {/each}
         </div>
       </div>
+      <div class="auto">
+        <span class="muted">自動更新</span>
+        <label class="field">
+          ローカル
+          <select value={prefs.autoLocalMin} onchange={(e) => setAuto("autoLocalMin", Number(e.currentTarget.value))}>
+            {#each [0, 1, 5, 15, 30, 60] as m (m)}<option value={m}>{m ? `${m} 分ごと` : "しない"}</option>{/each}
+          </select>
+        </label>
+        <label class="field">
+          リモート
+          <select
+            value={prefs.autoRemoteMin}
+            onchange={(e) => setAuto("autoRemoteMin", Number(e.currentTarget.value))}
+          >
+            {#each [0, 15, 30, 60, 180] as m (m)}<option value={m}>{m ? `${m} 分ごと` : "しない"}</option>{/each}
+          </select>
+        </label>
+      </div>
+      <p class="note">
+        ローカルはリポジトリの状態・コミット・Claude のセッション、リモートは GitHub / Gogs の一覧 (アカウントを使う設定のときだけ) を読み直します。
+        前回の更新から間隔が過ぎたら裏で更新し、ウィンドウが見えていないあいだは止めます。
+      </p>
       <div class="col">
         <label class="check">
           <input type="checkbox" checked={prefs.includeAutomated} onchange={(e) => setPref("includeAutomated", e.currentTarget.checked)} />
@@ -604,6 +631,19 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .auto {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 16px;
+  }
+
+  .field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .note {
