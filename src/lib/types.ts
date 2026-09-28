@@ -113,6 +113,8 @@ export interface Config {
   tags: Record<string, string[]>;
   /** 作ったタグの一覧 (プロジェクトが無くても削除するまで残す) */
   tagDefs: string[];
+  /** スター (お気に入り) を付けたプロジェクトの設定キー */
+  starred: string[];
 }
 
 export type AccountKind = "github" | "gogs" | "gitea";

@@ -61,6 +61,7 @@
   let filter = $state<Filter>("all");
   let sort = $state<Sort>("recent");
   let visibility = $state<Visibility>("shown");
+  let starOnly = $state(false);
   let remoteFilter = $state<RemoteFilter>("");
   let query = $state("");
   let selectedKey = $state<string | null>(null);
@@ -92,7 +93,8 @@
       (p) =>
         (visibility === "all" ? true : visibility === "hidden" ? p.hidden : !p.hidden) &&
         // クローンして作業しているフォークは隠さない。隠すのは未クローンのものだけ
-        !(prefs.hideForkArchived && p.kind === "remote" && (p.isFork || p.isArchived)),
+        !(prefs.hideForkArchived && p.kind === "remote" && (p.isFork || p.isArchived)) &&
+        (!starOnly || p.starred),
     ),
   );
   const forkArchivedCount = $derived(projects.filter((p) => p.kind === "remote" && (p.isFork || p.isArchived)).length);
@@ -154,7 +156,10 @@
   });
 
   /** 既定以外の絞り込みをしているか (検索も含む) */
-  const filtering = $derived(filter !== "all" || remoteFilter !== "" || visibility !== "shown" || query.trim() !== "");
+  const filtering = $derived(
+    filter !== "all" || remoteFilter !== "" || visibility !== "shown" || starOnly || query.trim() !== "",
+  );
+  const starredCount = $derived(projects.filter((p) => p.starred && !p.hidden).length);
 
   const flat = $derived(prefs.stateView === "time" ? sortProjects(shown) : []);
   const tree = $derived(
@@ -193,6 +198,7 @@
     filter = "all";
     remoteFilter = "";
     visibility = "shown";
+    starOnly = false;
     query = "";
   }
 
@@ -512,6 +518,13 @@
             <button class:on={prefs.stateView === v.id} onclick={() => setView(v.id)}>{v.label}</button>
           {/each}
         </div>
+        {#if tree}
+          <!-- ツリーのときだけ。表示形式のすぐ横に置き、一覧の近くで押せるように -->
+          <div class="segmented" role="group" aria-label="ツリーをまとめて開く・畳む">
+            <button onclick={() => setAll(true)} title="すべての階層を開く">📂 すべて開く</button>
+            <button onclick={() => setAll(false)} title="すべての階層を畳む">📁 すべて畳む</button>
+          </div>
+        {/if}
         <label class="field">
           <span class="muted">並び</span>
           <select bind:value={sort}>
@@ -524,11 +537,6 @@
         {#if prefs.stateView === "tag"}
           <button class="small" onclick={() => startAdd(null)}>タグを追加</button>
         {/if}
-        {#if tree}
-          <span class="spacer"></span>
-          <button class="ghost small" onclick={() => setAll(true)}>すべて開く</button>
-          <button class="ghost small" onclick={() => setAll(false)}>すべて畳む</button>
-        {/if}
       </div>
     </div>
 
@@ -536,6 +544,13 @@
     <div class="bar-row">
       <span class="caption">絞り込み</span>
       <div class="controls">
+        <button
+          class="star-filter"
+          class:on={starOnly}
+          aria-pressed={starOnly}
+          onclick={() => (starOnly = !starOnly)}
+          title="スターを付けたものだけ">★ スターだけ <span class="muted num">{starredCount}</span></button
+        >
         <div class="segmented" role="group" aria-label="状態で絞り込み">
           {#each filters as f (f.id)}
             <button class:on={filter === f.id} onclick={() => (filter = f.id)}
@@ -707,8 +722,10 @@
     background: var(--accent-wash);
   }
 
-  .spacer {
-    flex: 1;
+  .star-filter.on {
+    background: var(--accent-wash);
+    border-color: var(--accent);
+    font-weight: 600;
   }
 
   .small-text {

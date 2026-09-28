@@ -227,6 +227,15 @@ export function allTags(): string[] {
   return app.config ? tags_.definedTags(app.config) : [];
 }
 
+/** スター (お気に入り) を付ける / 外す */
+export async function setStarred(key: string, on: boolean) {
+  if (!app.config) return;
+  const set = new Set(app.config.starred ?? []);
+  if (on) set.add(key);
+  else set.delete(key);
+  await updateConfig({ ...app.config, starred: [...set] });
+}
+
 /** プロジェクトを一覧から外す / 戻す */
 export async function setHidden(key: string, hidden: boolean) {
   if (!app.config) return;

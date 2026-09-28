@@ -4,6 +4,7 @@
   import { errorText, setHidden, toast } from "$lib/store.svelte";
   import ProjectActions from "./ProjectActions.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
+  import StarButton from "./StarButton.svelte";
 
   let {
     project: p,
@@ -70,6 +71,7 @@
     onkeydown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onselect())}
   >
     <div class="line1">
+      <span class="star-slot" class:starred={p.starred}><StarButton project={p} /></span>
       <span class="name">{p.name}</span>
       <RemoteBadges links={p.links} showNone={p.kind === "local" && !p.local?.error} />
       {#if p.kind === "folder"}<span class="host">git 以外</span>{/if}
@@ -280,6 +282,18 @@
 
   :global(:root[data-density="compact"]) .row-actions {
     bottom: 3px;
+  }
+
+  /* スターは付いていれば常に、付いていなければカーソルを乗せたときだけ出す (位置はいつも確保してそろえる) */
+  .star-slot {
+    margin-left: -4px;
+    visibility: hidden;
+  }
+
+  .star-slot.starred,
+  li:hover .star-slot,
+  li:focus-within .star-slot {
+    visibility: visible;
   }
 
   /* 操作ボタンは行にカーソルを乗せたときだけ出す */

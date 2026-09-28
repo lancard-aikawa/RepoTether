@@ -42,6 +42,7 @@ const mockConfig: Config = {
   hidden: [],
   tags: {},
   tagDefs: [],
+  starred: [],
 };
 
 export async function getConfig(): Promise<Config> {

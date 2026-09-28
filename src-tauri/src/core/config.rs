@@ -28,6 +28,8 @@ pub struct Config {
     pub tags: BTreeMap<String, Vec<String>>,
     /// 作ったタグの一覧。プロジェクトが付いていなくても、削除するまで残す
     pub tag_defs: Vec<String>,
+    /// スター (お気に入り) を付けたプロジェクト。キーは hidden と同じ
+    pub starred: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -93,6 +95,7 @@ impl Default for Config {
             hidden: vec![],
             tags: BTreeMap::new(),
             tag_defs: vec![],
+            starred: vec![],
         }
     }
 }

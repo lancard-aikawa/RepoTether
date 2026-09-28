@@ -18,6 +18,7 @@
   import ProjectActions from "./ProjectActions.svelte";
   import ReadmeView from "./ReadmeView.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
+  import StarButton from "./StarButton.svelte";
 
   let { project, now, onclose }: { project: Project; now: number; onclose: () => void } = $props();
 
@@ -165,7 +166,7 @@
 <aside class="detail">
   <div class="head">
     <div class="title">
-      <h2>{project.name}</h2>
+      <h2><StarButton {project} big /> {project.name}</h2>
       <button class="ghost" onclick={onclose} aria-label="閉じる">閉じる</button>
     </div>
     {#if project.path}<div class="mono muted path">{project.path}</div>{/if}

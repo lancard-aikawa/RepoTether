@@ -25,6 +25,8 @@ export interface Project {
   prefKey: string;
   /** 自分で付けたタグ */
   tags: string[];
+  /** スター (お気に入り) */
+  starred: boolean;
   kind: ProjectKind;
   name: string;
   path: string | null;
@@ -75,6 +77,7 @@ function pathKey(p: string): string {
 export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): Project[] {
   const hidden = new Set(cfg.hidden);
   const tagsOf = (k: string) => cfg.tags?.[k] ?? [];
+  const starred = new Set(cfg.starred ?? []);
   const commitsByRepo = groupBy(snap.commits, (c) => c.repoId);
   const sessionsByRepo = groupBy(
     snap.sessions.filter((s) => s.repoId),
@@ -105,6 +108,7 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           key: repo.id,
           prefKey: repo.id,
           tags: tagsOf(repo.id),
+          starred: starred.has(repo.id),
           kind: "local",
           name: repo.name,
           path: repo.path,
@@ -138,6 +142,7 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           key: `remote:${r.key}`,
           prefKey: r.key,
           tags: tagsOf(r.key),
+          starred: starred.has(r.key),
           kind: "remote",
           name: r.name,
           path: null,
@@ -176,6 +181,7 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           key: `folder:${key}`,
           prefKey: `folder:${key}`,
           tags: tagsOf(`folder:${key}`),
+          starred: starred.has(`folder:${key}`),
           kind: "folder",
           name: path.split(/[\\/]/).filter(Boolean).pop() ?? path,
           path,
