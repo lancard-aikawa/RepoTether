@@ -263,6 +263,25 @@
     margin-right: 6px;
   }
 
+  /* コンパクト: 行を詰め、Claude の一行要約は省く (詳細パネルの Claude タブで見られる) */
+  :global(:root[data-density="compact"]) .row {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    gap: 1px;
+  }
+
+  :global(:root[data-density="compact"]) .name {
+    font-size: 13px;
+  }
+
+  :global(:root[data-density="compact"]) .session {
+    display: none;
+  }
+
+  :global(:root[data-density="compact"]) .row-actions {
+    bottom: 3px;
+  }
+
   /* 操作ボタンは行にカーソルを乗せたときだけ出す */
   .row-actions {
     position: absolute;

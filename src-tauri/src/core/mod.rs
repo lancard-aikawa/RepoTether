@@ -20,7 +20,8 @@ use model::{Commit, LocalRepo, RemoteRepo, Session, Snapshot, SourceError};
 
 /// ローカル側 (リポジトリ・コミット・セッション) を読み直す。リモート一覧は含めない。
 /// progress には「何をしているか」の短い文を渡す。
-pub fn build_local(cfg: &Config, cache_dir: &Path, progress: &(dyn Fn(String) + Sync)) -> Snapshot {
+/// fetch が真なら、状態を読む前に各リポジトリで git fetch する (ahead / behind を最新にする)。
+pub fn build_local(cfg: &Config, cache_dir: &Path, fetch: bool, progress: &(dyn Fn(String) + Sync)) -> Snapshot {
     let mut errors: Vec<SourceError> = vec![];
 
     progress("Claude のセッションを読んでいます".into());
@@ -64,6 +65,17 @@ pub fn build_local(cfg: &Config, cache_dir: &Path, progress: &(dyn Fn(String) + 
 
     let paths: Vec<PathBuf> = paths.into_values().collect();
     let total = paths.len();
+    if fetch {
+        progress(format!("git fetch しています (0/{total})"));
+        let failed = fetch_parallel(&paths, &|done| progress(format!("git fetch しています ({done}/{total})")));
+        for (p, e) in failed {
+            errors.push(SourceError {
+                source: "fetch".into(),
+                message: format!("{}: {e}", util::display_path(&p.to_string_lossy())),
+            });
+        }
+    }
+
     progress(format!("git の状態を読んでいます (0/{total})"));
     let results = inspect_parallel(&paths, cfg.history_days, &|done| {
         progress(format!("git の状態を読んでいます ({done}/{total})"));
@@ -101,6 +113,32 @@ pub fn build_local(cfg: &Config, cache_dir: &Path, progress: &(dyn Fn(String) + 
         remote_repos: vec![],
         errors,
     }
+}
+
+/// remote のあるリポジトリで並列に fetch する。失敗したものを返す
+fn fetch_parallel(paths: &[PathBuf], on_done: &(dyn Fn(usize) + Sync)) -> Vec<(PathBuf, String)> {
+    let next = AtomicUsize::new(0);
+    let done = AtomicUsize::new(0);
+    let failed: Mutex<Vec<(PathBuf, String)>> = Mutex::new(vec![]);
+    let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let i = next.fetch_add(1, Ordering::SeqCst);
+                let Some(p) = paths.get(i) else { break };
+                let has_remote = util::git(p, &["remote"]).map(|o| !o.trim().is_empty()).unwrap_or(false);
+                if has_remote {
+                    if let Err(e) = git::fetch(p) {
+                        failed.lock().unwrap().push((p.clone(), e));
+                    }
+                }
+                on_done(done.fetch_add(1, Ordering::SeqCst) + 1);
+            });
+        }
+    });
+    let mut out = failed.into_inner().unwrap();
+    out.sort();
+    out
 }
 
 fn inspect_parallel(

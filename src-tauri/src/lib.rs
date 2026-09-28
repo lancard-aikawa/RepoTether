@@ -116,17 +116,17 @@ fn load_snapshot(state: State<AppState>) -> Option<Snapshot> {
 /// ローカルを読み直す。include_remote ならリモート一覧も取り直し、そうでなければ前回分を引き継ぐ。
 /// 進み具合は "refresh-progress" イベントで送る。
 #[tauri::command]
-async fn refresh(app: AppHandle, include_remote: bool) -> Result<Snapshot, String> {
+async fn refresh(app: AppHandle, include_remote: bool, fetch: Option<bool>) -> Result<Snapshot, String> {
     let state = app.state::<AppState>();
     if state.refreshing.swap(true, Ordering::SeqCst) {
         return Err("更新中です".into());
     }
-    let result = refresh_inner(&app, include_remote).await;
+    let result = refresh_inner(&app, include_remote, fetch.unwrap_or(false)).await;
     state.refreshing.store(false, Ordering::SeqCst);
     result
 }
 
-async fn refresh_inner(app: &AppHandle, include_remote: bool) -> Result<Snapshot, String> {
+async fn refresh_inner(app: &AppHandle, include_remote: bool, fetch: bool) -> Result<Snapshot, String> {
     let state = app.state::<AppState>();
     let cfg = state.config.lock().unwrap().clone();
     let cache_dir = state.cache_dir.clone();
@@ -135,7 +135,7 @@ async fn refresh_inner(app: &AppHandle, include_remote: bool) -> Result<Snapshot
     let app2 = app.clone();
     let cfg2 = cfg.clone();
     let local = tauri::async_runtime::spawn_blocking(move || {
-        core::build_local(&cfg2, &cache_dir, &|m| {
+        core::build_local(&cfg2, &cache_dir, fetch, &|m| {
             let _ = app2.emit("refresh-progress", m);
         })
     })

@@ -259,6 +259,52 @@ fn read_log(path: &Path, repo_id: &str, history_days: u32) -> Result<Vec<Commit>
     Ok(commits)
 }
 
+/// fetch 1 回の上限。接続できない古いサーバーを待ち続けない
+const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// `git fetch --all --prune`。裏で動くので、認証の画面やパスワードの入力は一切出さない
+/// (出せないときは失敗にする)。FETCH_TIMEOUT を過ぎたら打ち切る。
+pub fn fetch(path: &Path) -> Result<(), String> {
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("-C")
+        .arg(path)
+        .args(["-c", "credential.interactive=false", "fetch", "--all", "--prune", "--quiet"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("GIT_ASKPASS", "")
+        .env("SSH_ASKPASS", "")
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=10")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    util::hide_window(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| format!("git を起動できません: {e}"))?;
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if status.success() {
+                    return Ok(());
+                }
+                let mut err = String::new();
+                if let Some(mut e) = child.stderr.take() {
+                    use std::io::Read;
+                    let _ = e.read_to_string(&mut err);
+                }
+                let first = err.lines().find(|l| !l.trim().is_empty()).unwrap_or("fetch に失敗しました");
+                return Err(util::truncate_chars(first.trim(), 200));
+            }
+            Ok(None) if started.elapsed() > FETCH_TIMEOUT => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{} 秒で応答がないので打ち切りました", FETCH_TIMEOUT.as_secs()));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+}
+
 /// `git clone <url> <dest>`。認証は git の資格情報マネージャーに任せる。
 pub fn clone(url: &str, dest: &Path) -> Result<(), String> {
     let ok_scheme = ["https://", "http://", "ssh://", "git://"].iter().any(|s| url.starts_with(s))

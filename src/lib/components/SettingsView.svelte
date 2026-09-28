@@ -176,9 +176,20 @@
     { id: "dark", label: "ダーク" },
   ];
 
+  function setFetch(v: boolean) {
+    prefs.fetchOnRemote = v;
+    savePrefs();
+  }
+
   function setAuto(k: "autoLocalMin" | "autoRemoteMin", v: number) {
     prefs[k] = v;
     savePrefs();
+  }
+
+  function setDensity(d: "normal" | "compact") {
+    prefs.density = d;
+    savePrefs();
+    applyTheme();
   }
 
   function setTheme(t: Theme) {
@@ -417,6 +428,11 @@
             <button class:on={prefs.theme === t.id} onclick={() => setTheme(t.id)}>{t.label}</button>
           {/each}
         </div>
+        <span class="muted">一覧の密度</span>
+        <div class="segmented" role="group" aria-label="一覧の密度">
+          <button class:on={prefs.density === "normal"} onclick={() => setDensity("normal")}>標準</button>
+          <button class:on={prefs.density === "compact"} onclick={() => setDensity("compact")}>コンパクト</button>
+        </div>
       </div>
       <div class="auto">
         <span class="muted">自動更新</span>
@@ -436,6 +452,14 @@
           </select>
         </label>
       </div>
+      <label class="check">
+        <input type="checkbox" checked={prefs.fetchOnRemote} onchange={(e) => setFetch(e.currentTarget.checked)} />
+        リモートを更新するとき、各リポジトリで <code>git fetch</code> もする
+      </label>
+      <p class="note">
+        fetch すると「取り込み待ち」の数と、別の PC で push した分が最新になります。リモートの追跡ブランチを書き換え、
+        ネットワークにもつなぐので既定はしません。認証の画面は出さず、1 つ 20 秒で打ち切り、失敗は「問題」タブに出します。
+      </p>
       <p class="note">
         ローカルはリポジトリの状態・コミット・Claude のセッション、リモートは GitHub / Gogs の一覧 (アカウントを使う設定のときだけ) を読み直します。
         前回の更新から間隔が過ぎたら裏で更新し、ウィンドウが見えていないあいだは止めます。

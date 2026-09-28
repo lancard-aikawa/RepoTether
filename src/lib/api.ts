@@ -74,13 +74,13 @@ export async function loadSnapshot(): Promise<Snapshot | null> {
   return call("load_snapshot");
 }
 
-export async function refresh(includeRemote: boolean): Promise<Snapshot> {
+export async function refresh(includeRemote: boolean, fetch = false): Promise<Snapshot> {
   if (!inTauri) {
     const s = await loadSnapshot();
     if (!s) throw new Error("static/dev-snapshot.json がありません");
     return s;
   }
-  return call("refresh", { includeRemote });
+  return call("refresh", { includeRemote, fetch });
 }
 
 export async function onProgress(f: (msg: string) => void): Promise<() => void> {

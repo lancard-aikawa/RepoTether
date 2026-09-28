@@ -32,8 +32,12 @@ export const prefs = $state({
   /** 自動更新の間隔 (分)。0 はしない。ローカル = リポジトリ・コミット・セッション、リモート = GitHub / Gogs の一覧 */
   autoLocalMin: 15,
   autoRemoteMin: 60,
+  /** リモートを更新するとき、各リポジトリで git fetch もする (既定はしない) */
+  fetchOnRemote: false,
   /** テーマ: OS に合わせる / ライト / ダーク */
   theme: "system" as Theme,
+  /** 一覧の密度: 標準 / コンパクト (行を詰め、Claude の一行要約を省く) */
+  density: "normal" as "normal" | "compact",
   /** 設定で最後に開いたタブ */
   settingsTab: "roots" as "roots" | "authors" | "accounts" | "other" | "hidden" | "errors",
 });
@@ -45,8 +49,9 @@ export type DetailTab = "summary" | "git" | "commits" | "claude" | "readme";
 export type StateViewMode = "time" | "folder" | "tag";
 export type Theme = "system" | "light" | "dark";
 
-/** テーマを画面とウィンドウのタイトルバーに当てる。system なら OS の設定に任せる */
+/** テーマと密度を画面に当てる (テーマはウィンドウのタイトルバーにも)。system なら OS の設定に任せる */
 export function applyTheme() {
+  document.documentElement.dataset.density = prefs.density;
   const t = prefs.theme;
   if (t === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = t;
@@ -154,7 +159,8 @@ export async function refresh(includeRemote: boolean) {
   app.error = "";
   app.progress = includeRemote ? "リモートも含めて更新しています" : "更新しています";
   try {
-    app.snapshot = await api.refresh(includeRemote);
+    // fetch はリモートを更新するときだけ (ローカルの読み直しは速さを優先)
+    app.snapshot = await api.refresh(includeRemote, includeRemote && prefs.fetchOnRemote);
   } catch (e) {
     app.error = errorText(e);
   } finally {

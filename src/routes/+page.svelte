@@ -69,8 +69,8 @@
           title="ローカル: {app.snapshot.generatedAt}{app.snapshot.remoteFetchedAt
             ? `\nリモート: ${app.snapshot.remoteFetchedAt}`
             : ''}"
-          >更新 {relative(toMs(app.snapshot.generatedAt), now)}{#if app.snapshot.remoteFetchedAt}
-            / リモート {relative(toMs(app.snapshot.remoteFetchedAt), now)}{/if}</span
+          >更新 {relative(toMs(app.snapshot.generatedAt), now)}{#if app.snapshot.remoteFetchedAt}{" / "}リモート
+            {relative(toMs(app.snapshot.remoteFetchedAt), now)}{/if}</span
         >
       {/if}
       {#if !inTauri}<span class="badge info">ブラウザ表示 (読み取りのみ)</span>{/if}

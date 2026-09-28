@@ -628,6 +628,8 @@
 <style>
   /* 操作欄は全幅。詳細を開いても幅が変わらず、折り返しで一覧の位置がずれない */
   .state {
+    /* ツリーの見出しの高さ。入れ子の見出しを積み重ねて固定する位置にも使う */
+    --gh: 31px;
     display: flex;
     flex-direction: column;
     flex: 1;
@@ -749,9 +751,9 @@
     border-bottom: 1px solid var(--line);
     background: var(--surface-2);
     padding: 0 12px 0 0;
-    min-height: 31px;
+    min-height: var(--gh);
     position: sticky;
-    top: calc(var(--depth) * 31px);
+    top: calc(var(--depth) * var(--gh));
     z-index: calc(10 - var(--depth));
   }
 
@@ -764,6 +766,10 @@
   }
 
   /* 畳む / 開くボタン */
+  :global(:root[data-density="compact"]) .state {
+    --gh: 26px;
+  }
+
   .toggle {
     display: flex;
     align-items: center;
@@ -771,7 +777,7 @@
     border: none;
     border-radius: 0;
     background: transparent;
-    padding: 5px 0 5px 8px;
+    padding: 3px 0 3px 8px;
     text-align: left;
     min-width: 0;
     flex: 0 1 auto;

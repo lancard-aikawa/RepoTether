@@ -8,8 +8,9 @@
     <script>
       // 描画前にテーマを当てる (起動直後に明るい画面が一瞬出ないように)。本体は store の applyTheme
       try {
-        const t = JSON.parse(localStorage.getItem("repotether.prefs") || "{}").theme;
-        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        const p = JSON.parse(localStorage.getItem("repotether.prefs") || "{}");
+        if (p.theme === "light" || p.theme === "dark") document.documentElement.dataset.theme = p.theme;
+        if (p.density === "compact") document.documentElement.dataset.density = "compact";
       } catch {}
     </script>
     %sveltekit.head%
