@@ -39,6 +39,7 @@
     if (p.lastClaudeAt != null) out.push({ kind: "claude", label: "Claude", title: "Claude と最後にやりとり", at: p.lastClaudeAt });
     if (p.lastGitAt != null) out.push({ kind: "git", label: "git", title: "最新のコミット", at: p.lastGitAt });
     if (p.lastEditAt != null) out.push({ kind: "edit", label: "変更", title: "未コミットのファイルを最後に変更", at: p.lastEditAt });
+    if (p.lastPushAt != null) out.push({ kind: "push", label: "push", title: "リモートに最後に push された", at: p.lastPushAt });
     return out;
   }
 
@@ -71,6 +72,8 @@
       <span class="name">{p.name}</span>
       <RemoteBadges links={p.links} showNone={p.kind === "local" && !p.local?.error} />
       {#if p.kind === "folder"}<span class="host">git 以外</span>{/if}
+      {#if p.isFork}<span class="host" title="ほかのリポジトリをフォークしたもの">フォーク</span>{/if}
+      {#if p.isArchived}<span class="host" title="リモートでアーカイブ済み (読み取り専用)">アーカイブ</span>{/if}
       {#if p.hidden}<span class="host">非表示</span>{/if}
       {#if p.local?.branch && p.local.branch !== p.local.defaultBranch}
         <span class="branch mono">{p.local.branch}</span>
@@ -214,6 +217,11 @@
 
   .t-kind.k-edit {
     border-style: dashed;
+  }
+
+  /* push はリモート側の時刻。ローカルの作業と見分けるため地を塗らず点線で */
+  .t-kind.k-push {
+    border-style: dotted;
   }
 
   .path {

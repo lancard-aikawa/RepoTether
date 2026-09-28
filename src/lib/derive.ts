@@ -40,8 +40,13 @@ export interface Project {
   lastActivity: number | null;
   /** Claude と最後にやりとりした時刻 */
   lastClaudeAt: number | null;
-  /** 最新のコミット (自分の分。履歴期間に無ければ誰かの最新コミットか、リモートの push) */
+  /** 最新のコミット (自分の分。履歴期間に無ければ、誰かの最新コミット) */
   lastGitAt: number | null;
+  /** リモートに最後に push された時刻 (未クローンのもの、またはローカルの活動が履歴期間に無いもの) */
+  lastPushAt: number | null;
+  /** 対応するリモートがフォーク / アーカイブ済みか */
+  isFork: boolean;
+  isArchived: boolean;
   /** 未コミットの変更があるとき、変更したファイルの一番新しい更新時刻 */
   lastEditAt: number | null;
   leftovers: Leftover[];
@@ -113,6 +118,9 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           lastActivity: null,
           lastClaudeAt: null,
           lastGitAt: null,
+          lastPushAt: null,
+          isFork: false,
+          isArchived: false,
           lastEditAt: null,
           leftovers: [],
           hidden: hidden.has(repo.id),
@@ -143,6 +151,9 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           lastActivity: null,
           lastClaudeAt: null,
           lastGitAt: null,
+          lastPushAt: null,
+          isFork: false,
+          isArchived: false,
           lastEditAt: null,
           leftovers: [],
           hidden: hidden.has(r.key),
@@ -178,6 +189,9 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           lastActivity: null,
           lastClaudeAt: null,
           lastGitAt: null,
+          lastPushAt: null,
+          isFork: false,
+          isArchived: false,
           lastEditAt: null,
           leftovers: [],
           hidden: hidden.has(`folder:${key}`),
@@ -199,11 +213,14 @@ function finish(p: Project, opt: BuildOptions): Project {
   const mine = toMs(p.myCommits[0]?.at);
   p.lastGitAt = mine;
   let last = maxOf([mine, p.lastClaudeAt, p.lastEditAt]);
-  // 履歴期間より前のものしか無ければ、最新コミットやリモートの push 時刻で代用する
+  // 履歴期間より前のものしか無ければ、最新コミット (誰の分でも) やリモートの push 時刻で代用する
   if (last == null) {
-    p.lastGitAt = maxOf([toMs(p.local?.lastCommitAt), toMs(p.remotes[0]?.pushedAt)]);
-    last = p.lastGitAt;
+    p.lastGitAt = toMs(p.local?.lastCommitAt);
+    p.lastPushAt = maxOf(p.remotes.map((r) => toMs(r.pushedAt ?? r.updatedAt)));
+    last = maxOf([p.lastGitAt, p.lastPushAt]);
   }
+  p.isFork = p.remotes.some((r) => r.fork);
+  p.isArchived = p.remotes.some((r) => r.archived);
   p.lastActivity = last;
   p.leftovers = leftoversOf(p);
   return p;

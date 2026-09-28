@@ -25,6 +25,8 @@ export const prefs = $state({
   detailTab: "summary" as DetailTab,
   /** 日報の表示: 編集 / 並べて表示 / プレビュー */
   reportView: "split" as ReportViewMode,
+  /** 未クローンのフォーク・アーカイブを状態タブで隠す */
+  hideForkArchived: false,
 });
 
 export type ReportViewMode = "edit" | "split" | "preview";

@@ -85,8 +85,19 @@
 
   // 表示 / 非表示で絞ったもの。ほかの絞り込みの件数はこれを母数にする
   const byVisibility = $derived(
-    projects.filter((p) => (visibility === "all" ? true : visibility === "hidden" ? p.hidden : !p.hidden)),
+    projects.filter(
+      (p) =>
+        (visibility === "all" ? true : visibility === "hidden" ? p.hidden : !p.hidden) &&
+        // クローンして作業しているフォークは隠さない。隠すのは未クローンのものだけ
+        !(prefs.hideForkArchived && p.kind === "remote" && (p.isFork || p.isArchived)),
+    ),
   );
+  const forkArchivedCount = $derived(projects.filter((p) => p.kind === "remote" && (p.isFork || p.isArchived)).length);
+
+  function setHideForkArchived(v: boolean) {
+    prefs.hideForkArchived = v;
+    savePrefs();
+  }
 
   const counts = $derived(
     Object.fromEntries(
@@ -519,6 +530,16 @@
               <option value="all">含める</option>
             </select>
           </label>
+          {#if forkArchivedCount}
+            <label class="check small-text" title="クローンして作業しているフォークは隠しません">
+              <input
+                type="checkbox"
+                checked={prefs.hideForkArchived}
+                onchange={(e) => setHideForkArchived(e.currentTarget.checked)}
+              />
+              未クローンのフォーク・アーカイブを隠す <span class="muted num">({forkArchivedCount})</span>
+            </label>
+          {/if}
           {#if filtering}
             <button class="ghost small" onclick={clearFilters}>条件を解除</button>
           {/if}
@@ -644,6 +665,10 @@
 
   .spacer {
     flex: 1;
+  }
+
+  .small-text {
+    font-size: 12px;
   }
 
   .small {
