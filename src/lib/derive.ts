@@ -36,7 +36,14 @@ export interface Project {
   commits: Commit[];
   myCommits: Commit[];
   lastSession: Session | null;
+  /** 最新の作業 (下の 3 つの一番新しいもの)。並び替えに使う */
   lastActivity: number | null;
+  /** Claude と最後にやりとりした時刻 */
+  lastClaudeAt: number | null;
+  /** 最新のコミット (自分の分。履歴期間に無ければ誰かの最新コミットか、リモートの push) */
+  lastGitAt: number | null;
+  /** 未コミットの変更があるとき、変更したファイルの一番新しい更新時刻 */
+  lastEditAt: number | null;
   leftovers: Leftover[];
   hidden: boolean;
 }
@@ -104,6 +111,9 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           myCommits: commits.filter((c) => isMine(c.authorEmail, cfg)),
           lastSession: null,
           lastActivity: null,
+          lastClaudeAt: null,
+          lastGitAt: null,
+          lastEditAt: null,
           leftovers: [],
           hidden: hidden.has(repo.id),
         },
@@ -131,6 +141,9 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           myCommits: [],
           lastSession: null,
           lastActivity: null,
+          lastClaudeAt: null,
+          lastGitAt: null,
+          lastEditAt: null,
           leftovers: [],
           hidden: hidden.has(r.key),
         },
@@ -163,6 +176,9 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           myCommits: [],
           lastSession: null,
           lastActivity: null,
+          lastClaudeAt: null,
+          lastGitAt: null,
+          lastEditAt: null,
           leftovers: [],
           hidden: hidden.has(`folder:${key}`),
         },
@@ -178,14 +194,16 @@ function finish(p: Project, opt: BuildOptions): Project {
   const active = p.sessions.filter((s) => countsAsActivity(s, opt));
   p.lastSession = active[0] ?? null;
 
-  const times: (number | null)[] = [
-    toMs(p.myCommits[0]?.at),
-    toMs(p.lastSession?.endedAt),
-    toMs(p.local?.dirtyModifiedAt),
-  ];
-  let last = maxOf(times);
+  p.lastClaudeAt = toMs(p.lastSession?.endedAt);
+  p.lastEditAt = toMs(p.local?.dirtyModifiedAt);
+  const mine = toMs(p.myCommits[0]?.at);
+  p.lastGitAt = mine;
+  let last = maxOf([mine, p.lastClaudeAt, p.lastEditAt]);
   // 履歴期間より前のものしか無ければ、最新コミットやリモートの push 時刻で代用する
-  if (last == null) last = maxOf([toMs(p.local?.lastCommitAt), toMs(p.remotes[0]?.pushedAt)]);
+  if (last == null) {
+    p.lastGitAt = maxOf([toMs(p.local?.lastCommitAt), toMs(p.remotes[0]?.pushedAt)]);
+    last = p.lastGitAt;
+  }
   p.lastActivity = last;
   p.leftovers = leftoversOf(p);
   return p;

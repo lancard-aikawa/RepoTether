@@ -33,6 +33,15 @@
     return `${title}${last}`;
   }
 
+  /** 右端に出す時刻。Claude / git / 変更 の順で、無いものは出さない */
+  function timesOf(p: Project) {
+    const out: { kind: string; label: string; title: string; at: number }[] = [];
+    if (p.lastClaudeAt != null) out.push({ kind: "claude", label: "Claude", title: "Claude と最後にやりとり", at: p.lastClaudeAt });
+    if (p.lastGitAt != null) out.push({ kind: "git", label: "git", title: "最新のコミット", at: p.lastGitAt });
+    if (p.lastEditAt != null) out.push({ kind: "edit", label: "変更", title: "未コミットのファイルを最後に変更", at: p.lastEditAt });
+    return out;
+  }
+
   async function toggleHidden() {
     try {
       await setHidden(p.prefKey, !p.hidden);
@@ -66,9 +75,19 @@
       {#if p.local?.branch && p.local.branch !== p.local.defaultBranch}
         <span class="branch mono">{p.local.branch}</span>
       {/if}
-      <span class="when muted" title={p.lastActivity ? new Date(p.lastActivity).toLocaleString() : ""}
-        >{relative(p.lastActivity, now)}</span
-      >
+      <span class="times">
+        {#each timesOf(p) as t (t.kind)}
+          <span
+            class="t"
+            class:latest={t.at === p.lastActivity}
+            title="{t.title}: {new Date(t.at).toLocaleString()}{t.at === p.lastActivity ? ' (並び替えに使っている時刻)' : ''}"
+          >
+            <span class="t-kind k-{t.kind}">{t.label}</span>{relative(t.at, now)}
+          </span>
+        {:else}
+          <span class="muted">-</span>
+        {/each}
+      </span>
     </div>
     {#if p.path}<div class="path mono muted">{p.path}</div>{/if}
     {#if p.kind === "remote" && p.remotes[0]?.description}
@@ -157,10 +176,44 @@
     color: var(--ink-2);
   }
 
-  .when {
+  .times {
     margin-left: auto;
+    display: inline-flex;
+    gap: 10px;
     white-space: nowrap;
     font-size: 12px;
+    color: var(--muted);
+  }
+
+  .t {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* 並び替えに使っている (一番新しい) 時刻 */
+  .t.latest {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .t-kind {
+    font-size: 10.5px;
+    font-weight: 400;
+    color: var(--ink-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 3px;
+    padding: 0 4px;
+    line-height: 1.4;
+  }
+
+  /* 履歴タブの commit / Claude と同じ見分け方: Claude は青の枠 */
+  .t-kind.k-claude {
+    border-color: var(--accent);
+  }
+
+  .t-kind.k-edit {
+    border-style: dashed;
   }
 
   .path {
