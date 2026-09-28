@@ -94,6 +94,12 @@ fn read_readme(path: String) -> Result<Option<Readme>, String> {
     Ok(None)
 }
 
+/// この PC で選べる端末
+#[tauri::command]
+fn list_terminals() -> Vec<launch::TerminalChoice> {
+    launch::terminals()
+}
+
 /// GitHub CLI (gh) のログイン状態。ログインしていればアカウント名を返す (トークンは返さない)
 #[tauri::command]
 async fn check_gh(base_url: String) -> Result<String, String> {
@@ -169,7 +175,7 @@ async fn clone_repo(url: String, dest: String) -> Result<String, String> {
 
 /// target: "vscode" / "terminal" / "explorer"
 #[tauri::command]
-fn open_in(target: String, path: String) -> Result<(), String> {
+fn open_in(target: String, path: String, terminal: Option<String>) -> Result<(), String> {
     let p = PathBuf::from(util::display_path(&path));
     // 絶対パスだけ受け付ける (先頭が "-" の値をオプションとして解釈させない)
     if !p.is_absolute() {
@@ -180,7 +186,7 @@ fn open_in(target: String, path: String) -> Result<(), String> {
     }
     match target.as_str() {
         "vscode" => launch::vscode(&p)?,
-        "terminal" => launch::terminal(&p)?,
+        "terminal" => launch::terminal(&p, terminal.as_deref().unwrap_or(""))?,
         "explorer" => launch::folder(&p)?,
         t => return Err(format!("未対応の開き方です: {t}")),
     }
@@ -265,7 +271,8 @@ pub fn run() {
             save_text_with_dialog,
             open_credential_manager,
             read_readme,
-            check_gh
+            check_gh,
+            list_terminals
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

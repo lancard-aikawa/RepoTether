@@ -3,7 +3,7 @@
 //! | 操作 | Windows | macOS |
 //! |---|---|---|
 //! | VS Code | Code.exe を直接起動 | `open -a "Visual Studio Code"` |
-//! | 端末 | Windows Terminal (無ければ PowerShell) | `open -a Terminal` |
+//! | 端末 | 選んだもの。自動なら Windows Terminal (無ければ PowerShell) | 選んだもの。自動なら Terminal |
 //! | フォルダ | エクスプローラー | Finder (`open`) |
 //! | 資格情報 | 資格情報マネージャー | キーチェーンアクセス |
 
@@ -18,6 +18,13 @@ pub use macos::*;
 
 #[cfg(not(any(windows, target_os = "macos")))]
 pub use other::*;
+
+/// 選べる端末 (この PC で見つかったもの)
+#[derive(serde::Serialize)]
+pub struct TerminalChoice {
+    pub id: &'static str,
+    pub label: &'static str,
+}
 
 fn spawn(cmd: &mut Command) -> Result<(), String> {
     clean_env(cmd).spawn().map(|_| ()).map_err(|e| e.to_string())
@@ -53,17 +60,74 @@ mod windows {
         spawn(&mut cmd)
     }
 
-    pub fn terminal(dir: &Path) -> Result<(), String> {
-        // Windows Terminal があればそれを使う
-        if clean_env(Command::new("wt.exe").arg("-d").arg(dir)).spawn().is_ok() {
-            return Ok(());
+    /// 新しいコンソール窓で開く (PowerShell / cmd / WSL)
+    fn console(exe: &str, args: &[&str], dir: &Path) -> Result<(), String> {
+        spawn(Command::new(exe).args(args).current_dir(dir).creation_flags(CREATE_NEW_CONSOLE))
+    }
+
+    fn on_path(exe: &str) -> bool {
+        std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).any(|d| d.join(exe).is_file()))
+            .unwrap_or(false)
+    }
+
+    fn git_bash() -> Option<PathBuf> {
+        let mut cands = vec![];
+        for v in ["ProgramFiles", "ProgramW6432"] {
+            if let Some(p) = std::env::var_os(v) {
+                cands.push(PathBuf::from(p).join("Git").join("git-bash.exe"));
+            }
         }
-        spawn(
-            Command::new("powershell.exe")
-                .arg("-NoExit")
-                .current_dir(dir)
-                .creation_flags(CREATE_NEW_CONSOLE),
-        )
+        if let Some(l) = std::env::var_os("LOCALAPPDATA") {
+            cands.push(PathBuf::from(l).join("Programs").join("Git").join("git-bash.exe"));
+        }
+        cands.into_iter().find(|c| c.is_file())
+    }
+
+    pub fn terminals() -> Vec<TerminalChoice> {
+        let mut out = vec![];
+        if on_path("wt.exe") {
+            out.push(TerminalChoice { id: "wt", label: "Windows Terminal" });
+        }
+        if on_path("pwsh.exe") {
+            out.push(TerminalChoice { id: "pwsh", label: "PowerShell 7" });
+        }
+        out.push(TerminalChoice { id: "powershell", label: "Windows PowerShell" });
+        out.push(TerminalChoice { id: "cmd", label: "コマンドプロンプト" });
+        if git_bash().is_some() {
+            out.push(TerminalChoice { id: "gitbash", label: "Git Bash" });
+        }
+        if on_path("wsl.exe") {
+            out.push(TerminalChoice { id: "wsl", label: "WSL" });
+        }
+        out
+    }
+
+    /// kind が空なら自動 (Windows Terminal、無ければ PowerShell)
+    pub fn terminal(dir: &Path, kind: &str) -> Result<(), String> {
+        match kind {
+            "" => {
+                if clean_env(Command::new("wt.exe").arg("-d").arg(dir)).spawn().is_ok() {
+                    return Ok(());
+                }
+                console("powershell.exe", &["-NoExit"], dir)
+            }
+            "wt" => spawn(Command::new("wt.exe").arg("-d").arg(dir)),
+            "pwsh" => console("pwsh.exe", &["-NoExit"], dir),
+            "powershell" => console("powershell.exe", &["-NoExit"], dir),
+            "cmd" => console("cmd.exe", &["/K"], dir),
+            "gitbash" => {
+                let exe = git_bash().ok_or("Git Bash が見つかりません")?;
+                let mut cmd = Command::new(exe);
+                cmd.arg(format!("--cd={}", dir.display()));
+                spawn(&mut cmd)
+            }
+            "wsl" => {
+                let d = dir.to_string_lossy().into_owned();
+                console("wsl.exe", &["--cd", &d], dir)
+            }
+            k => Err(format!("未対応の端末です: {k}")),
+        }
     }
 
     pub fn folder(dir: &Path) -> Result<(), String> {
@@ -113,8 +177,20 @@ mod macos {
         open_with("Visual Studio Code", dir)
     }
 
-    pub fn terminal(dir: &Path) -> Result<(), String> {
-        open_with("Terminal", dir)
+    pub fn terminals() -> Vec<TerminalChoice> {
+        let mut out = vec![TerminalChoice { id: "terminal", label: "ターミナル" }];
+        if Path::new("/Applications/iTerm.app").exists() {
+            out.push(TerminalChoice { id: "iterm", label: "iTerm" });
+        }
+        out
+    }
+
+    pub fn terminal(dir: &Path, kind: &str) -> Result<(), String> {
+        match kind {
+            "" | "terminal" => open_with("Terminal", dir),
+            "iterm" => open_with("iTerm", dir),
+            k => Err(format!("未対応の端末です: {k}")),
+        }
     }
 
     pub fn folder(dir: &Path) -> Result<(), String> {
@@ -134,7 +210,11 @@ mod other {
         spawn(Command::new("code").arg(dir))
     }
 
-    pub fn terminal(_dir: &Path) -> Result<(), String> {
+    pub fn terminals() -> Vec<TerminalChoice> {
+        vec![]
+    }
+
+    pub fn terminal(_dir: &Path, _kind: &str) -> Result<(), String> {
         Err("この OS では端末を開けません".into())
     }
 
@@ -162,5 +242,20 @@ mod tests {
         assert!(!text.contains("VSCODE_PID"));
         // ほかの環境変数は残す
         assert!(text.to_uppercase().contains("PATH="));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod terminal_tests {
+    use super::*;
+
+    #[test]
+    fn detects_terminals_and_rejects_unknown_kind() {
+        let ids: Vec<&str> = terminals().iter().map(|t| t.id).collect();
+        println!("見つかった端末: {ids:?}");
+        // どの Windows にもあるもの
+        assert!(ids.contains(&"powershell") && ids.contains(&"cmd"));
+        // 決まった種類以外は開かない
+        assert!(terminal(std::path::Path::new("C:\\"), "calc").is_err());
     }
 }

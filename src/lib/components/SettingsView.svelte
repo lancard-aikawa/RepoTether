@@ -186,6 +186,17 @@
     savePrefs();
   }
 
+  // この PC で見つかった端末
+  let terminals = $state<api.TerminalChoice[]>([]);
+  $effect(() => {
+    api.listTerminals().then((t) => (terminals = t)).catch(() => {});
+  });
+
+  function setTerminal(id: string) {
+    prefs.terminal = id;
+    savePrefs();
+  }
+
   function setDensity(d: "normal" | "compact") {
     prefs.density = d;
     savePrefs();
@@ -428,6 +439,13 @@
             <button class:on={prefs.theme === t.id} onclick={() => setTheme(t.id)}>{t.label}</button>
           {/each}
         </div>
+        <label class="field">
+          <span class="muted">端末</span>
+          <select value={prefs.terminal} onchange={(e) => setTerminal(e.currentTarget.value)}>
+            <option value="">自動 (Windows Terminal、無ければ PowerShell)</option>
+            {#each terminals as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
+          </select>
+        </label>
         <span class="muted">一覧の密度</span>
         <div class="segmented" role="group" aria-label="一覧の密度">
           <button class:on={prefs.density === "normal"} onclick={() => setDensity("normal")}>標準</button>

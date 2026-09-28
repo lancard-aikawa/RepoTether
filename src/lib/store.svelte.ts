@@ -36,6 +36,8 @@ export const prefs = $state({
   fetchOnRemote: false,
   /** テーマ: OS に合わせる / ライト / ダーク */
   theme: "system" as Theme,
+  /** 開く端末 (空なら自動: Windows Terminal、無ければ PowerShell) */
+  terminal: "",
   /** 一覧の密度: 標準 / コンパクト (行を詰め、Claude の一行要約を省く) */
   density: "normal" as "normal" | "compact",
   /** 設定で最後に開いたタブ */

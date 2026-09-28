@@ -91,9 +91,21 @@ export async function onProgress(f: (msg: string) => void): Promise<() => void> 
 
 export type OpenTarget = "vscode" | "terminal" | "explorer";
 
-export async function openIn(target: OpenTarget, path: string): Promise<void> {
+/** terminal は端末の種類 (空なら自動)。target が terminal のときだけ使う */
+export async function openIn(target: OpenTarget, path: string, terminal = ""): Promise<void> {
   if (!inTauri) throw new Error("ブラウザ表示では開けません");
-  return call("open_in", { target, path });
+  return call("open_in", { target, path, terminal });
+}
+
+export interface TerminalChoice {
+  id: string;
+  label: string;
+}
+
+/** この PC で見つかった端末 */
+export async function listTerminals(): Promise<TerminalChoice[]> {
+  if (!inTauri) return [{ id: "wt", label: "Windows Terminal" }, { id: "pwsh", label: "PowerShell 7" }];
+  return call("list_terminals");
 }
 
 export async function openUrl(url: string): Promise<void> {

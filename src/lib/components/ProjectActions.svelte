@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Project } from "$lib/derive";
   import * as api from "$lib/api";
-  import { errorText, toast } from "$lib/store.svelte";
+  import { errorText, prefs, toast } from "$lib/store.svelte";
   import CloneDialog from "./CloneDialog.svelte";
 
   let { project, compact = false }: { project: Project; compact?: boolean } = $props();
@@ -11,7 +11,7 @@
   async function open(target: api.OpenTarget) {
     if (!project.path) return;
     try {
-      await api.openIn(target, project.path);
+      await api.openIn(target, project.path, prefs.terminal);
     } catch (e) {
       toast(errorText(e));
     }
