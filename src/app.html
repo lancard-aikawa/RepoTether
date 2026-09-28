@@ -5,6 +5,13 @@
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>RepoTether</title>
+    <script>
+      // 描画前にテーマを当てる (起動直後に明るい画面が一瞬出ないように)。本体は store の applyTheme
+      try {
+        const t = JSON.parse(localStorage.getItem("repotether.prefs") || "{}").theme;
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      } catch {}
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

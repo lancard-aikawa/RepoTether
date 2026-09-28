@@ -5,7 +5,17 @@
   import { emailCandidates } from "$lib/derive";
   import type { Account, AccountKind, Config } from "$lib/types";
   import * as api from "$lib/api";
-  import { app, errorText, prefs, refresh, savePrefs, toast, updateConfig } from "$lib/store.svelte";
+  import {
+    app,
+    applyTheme,
+    errorText,
+    prefs,
+    refresh,
+    savePrefs,
+    toast,
+    updateConfig,
+    type Theme,
+  } from "$lib/store.svelte";
 
   let { projects }: { projects: Project[] } = $props();
 
@@ -145,7 +155,7 @@
         { id: "accounts", label: "アカウント", dirty: !same(draft.accounts, saved.accounts) },
         {
           id: "other",
-          label: "その他",
+          label: "表示・その他",
           dirty: !same([draft.cloneRoot, draft.claudeDir], [saved.cloneRoot, saved.claudeDir]),
         },
         { id: "hidden", label: "非表示", count: draft.hidden.length, dirty: !same(draft.hidden, saved.hidden) },
@@ -158,6 +168,18 @@
   function selectTab(t: SettingsTab) {
     prefs.settingsTab = t;
     savePrefs();
+  }
+
+  const themes: { id: Theme; label: string }[] = [
+    { id: "system", label: "OS に合わせる" },
+    { id: "light", label: "ライト" },
+    { id: "dark", label: "ダーク" },
+  ];
+
+  function setTheme(t: Theme) {
+    prefs.theme = t;
+    savePrefs();
+    applyTheme();
   }
 
   function setPref(k: "includeAutomated", v: boolean) {
@@ -383,6 +405,14 @@
 
     <section class="panel card">
       <h2>表示 <span class="muted small">(すぐに反映・この PC だけ)</span></h2>
+      <div class="inline">
+        <span class="muted">テーマ</span>
+        <div class="segmented" role="group" aria-label="テーマ">
+          {#each themes as t (t.id)}
+            <button class:on={prefs.theme === t.id} onclick={() => setTheme(t.id)}>{t.label}</button>
+          {/each}
+        </div>
+      </div>
       <div class="col">
         <label class="check">
           <input type="checkbox" checked={prefs.includeAutomated} onchange={(e) => setPref("includeAutomated", e.currentTarget.checked)} />

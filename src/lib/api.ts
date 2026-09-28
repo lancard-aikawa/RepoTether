@@ -115,6 +115,13 @@ export async function trustRepo(path: string): Promise<void> {
   return call("trust_repo", { path });
 }
 
+/** ウィンドウのタイトルバーの明暗。null なら OS に合わせる */
+export async function setWindowTheme(theme: "light" | "dark" | null): Promise<void> {
+  if (!inTauri) return;
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().setTheme(theme);
+}
+
 /** 保存ダイアログを出して書く。キャンセルなら null */
 export async function saveTextWithDialog(defaultName: string, content: string): Promise<string | null> {
   if (!inTauri) {

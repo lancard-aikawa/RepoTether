@@ -29,6 +29,8 @@ export const prefs = $state({
   reportView: "split" as ReportViewMode,
   /** 未クローンのフォーク・アーカイブを状態タブで隠す */
   hideForkArchived: false,
+  /** テーマ: OS に合わせる / ライト / ダーク */
+  theme: "system" as Theme,
   /** 設定で最後に開いたタブ */
   settingsTab: "roots" as "roots" | "authors" | "accounts" | "other" | "hidden" | "errors",
 });
@@ -38,6 +40,17 @@ export type ReportViewMode = "edit" | "split" | "preview";
 export type DetailTab = "summary" | "git" | "commits" | "claude" | "readme";
 
 export type StateViewMode = "time" | "folder" | "tag";
+export type Theme = "system" | "light" | "dark";
+
+/** テーマを画面とウィンドウのタイトルバーに当てる。system なら OS の設定に任せる */
+export function applyTheme() {
+  const t = prefs.theme;
+  if (t === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  api.setWindowTheme(t === "system" ? null : t).catch(() => {
+    // タイトルバーの色が変わらないだけなので、失敗しても続ける
+  });
+}
 
 export type Tab = "state" | "history" | "graph" | "report" | "settings";
 
@@ -93,6 +106,7 @@ export function errorText(e: unknown): string {
 /** 起動時: キャッシュをすぐ表示し、裏でローカルを読み直す */
 export async function init() {
   loadPrefs();
+  applyTheme();
   await api.onProgress((m) => (app.progress = m));
   try {
     app.config = await api.getConfig();
