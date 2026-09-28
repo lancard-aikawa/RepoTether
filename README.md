@@ -33,6 +33,8 @@
   最後の返答、プロンプトの時刻を抜き出す。SDK からの自動実行 (`entrypoint` が `sdk-*`) は既定で活動に数えない
 - **リモートの一覧** — トークンがあれば `/user/repos` (見られる全部)、無ければ `/users/{user}/repos` (公開分)。
   Gogs はトークンが必須。ローカルの remote URL と `host/owner/name` で照合する
+- **GitHub の認証** — 既定は GitHub CLI のログインを借りる (`gh auth token` を一覧を取るたびに呼ぶ)。
+  RepoTether にはトークンを置かない。ログインは `gh auth login --web` (ブラウザの OAuth)。トークンを直接使うこともできる
 
 「自分のコミット」は設定のメールアドレスで判定する。GitHub の Web 上でのコミットは
 `...@users.noreply.github.com` になるので、設定画面の候補から足しておく。

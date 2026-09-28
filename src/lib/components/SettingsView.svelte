@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
   import type { Project } from "$lib/derive";
   import { emailCandidates } from "$lib/derive";
@@ -14,6 +15,26 @@
   let saving = $state(false);
   /** 保存済みのトークンを入れ直そうとしているアカウント */
   const replacing = new SvelteSet<string>();
+
+  // gh のログイン状態 (アカウントごと)
+  let ghState = $state<Record<string, { state: "checking" | "ok" | "error"; text: string }>>({});
+
+  async function checkGh(a: Account) {
+    ghState[a.id] = { state: "checking", text: "" };
+    try {
+      ghState[a.id] = { state: "ok", text: await api.checkGh(a.baseUrl) };
+    } catch (e) {
+      ghState[a.id] = { state: "error", text: errorText(e) };
+    }
+  }
+
+  // アカウントのタブを開いたら、gh を使うアカウントの状態を自動で確かめる
+  $effect(() => {
+    if (tab !== "accounts") return;
+    for (const a of untrack(() => draft.accounts)) {
+      if (a.kind === "github" && a.auth === "gh" && !untrack(() => ghState[a.id])) checkGh(a);
+    }
+  });
 
   async function copy(text: string) {
     try {
@@ -74,6 +95,8 @@
       label: kind === "github" ? "GitHub" : kind === "gogs" ? "Gogs" : "Gitea",
       baseUrl: "",
       user: "",
+      // GitHub は gh のログインを借りるのを既定にする (トークンの管理が要らない)
+      auth: kind === "github" ? "gh" : "token",
       token: "",
       hasToken: false,
       clearToken: false,
@@ -225,9 +248,9 @@
     <section class="panel card">
       <h2>リモートのアカウント</h2>
       <p class="muted">
-        トークンがあれば見られる全リポジトリ、無ければユーザー名の公開リポジトリを取ります (Gogs はトークンが必須)。
-        トークンは設定ファイルではなく {api.secretStoreName} に保存され、この画面にも表示されません。
-        読み取り権限だけのトークンを使ってください。
+        GitHub は gh コマンドのログインを借りるのがおすすめです (RepoTether にトークンを置かずに済みます)。
+        トークンを使う場合は、トークンがあれば見られる全リポジトリ、無ければユーザー名の公開リポジトリを取ります (Gogs はトークンが必須)。
+        トークンは設定ファイルではなく {api.secretStoreName} に保存され、この画面にも表示されません。読み取り権限だけのトークンを使ってください。
       </p>
       <button onclick={openStore}>{api.secretStoreApp}を開く</button>
       <details class="howto">
@@ -270,6 +293,31 @@
               placeholder={a.kind === "github" ? "空なら https://api.github.com" : "https://git.example.com"}
               bind:value={a.baseUrl}
             />
+            {#if a.kind === "github"}
+              <span class="muted">認証</span>
+              <div class="inline">
+                <label class="check"><input type="radio" bind:group={a.auth} value="gh" /> gh コマンドのログインを使う (おすすめ)</label>
+                <label class="check"><input type="radio" bind:group={a.auth} value="token" /> トークン</label>
+              </div>
+            {/if}
+            {#if a.kind === "github" && a.auth === "gh"}
+              <span class="muted">gh の状態</span>
+              <div class="inline gh-status">
+                {#if ghState[a.id]?.state === "ok"}
+                  <span class="badge good">{ghState[a.id].text} でログイン中</span>
+                {:else if ghState[a.id]?.state === "error"}
+                  <span class="gh-error">{ghState[a.id].text}</span>
+                {:else if ghState[a.id]?.state === "checking"}
+                  <span class="muted">確かめています…</span>
+                {/if}
+                <button onclick={() => checkGh(a)}>確認</button>
+              </div>
+              <span></span>
+              <p class="note">
+                一覧を取るたびに <code>gh auth token</code> でトークンを受け取ります。RepoTether には保存しません。
+                ログインしていなければ、ターミナルで <code>gh auth login --web</code> を実行してください (ブラウザでログインします)。
+              </p>
+            {:else}
             <label for="user-{a.id}">ユーザー名</label>
             <input id="user-{a.id}" type="text" placeholder="トークンなしのときに使う" bind:value={a.user} />
             <label for="token-{a.id}">トークン</label>
@@ -304,6 +352,7 @@
               <code class="mono">RepoTether:{a.id}</code>
               <button class="ghost" onclick={() => copy(`RepoTether:${a.id}`)}>コピー</button>
             </div>
+            {/if}
           </div>
         </div>
       {/each}
@@ -525,6 +574,17 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .note {
+    font-size: 12px;
+    color: var(--ink-2);
+    margin: 0;
+  }
+
+  .gh-error {
+    font-size: 12px;
+    color: var(--st-high);
   }
 
   .howto {

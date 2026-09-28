@@ -14,6 +14,12 @@ export const sep = isWindows ? "\\" : "/";
 export const secretStoreName = isMac ? "キーチェーン" : isWindows ? "資格情報マネージャー" : "資格情報の保管庫";
 export const secretStoreApp = isMac ? "キーチェーンアクセス" : secretStoreName;
 
+/** gh でログインしているアカウント名。ログインしていなければ理由を投げる */
+export async function checkGh(baseUrl: string): Promise<string> {
+  if (!inTauri) throw new Error("ブラウザ表示では確認できません");
+  return call("check_gh", { baseUrl });
+}
+
 export async function openSecretStore(): Promise<void> {
   if (!inTauri) throw new Error("ブラウザ表示では開けません");
   return call("open_credential_manager");

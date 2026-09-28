@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::{secrets, util};
+use super::{gh, secrets, util};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -41,6 +41,8 @@ pub struct Account {
     pub base_url: String,
     /// トークンなしで公開リポジトリだけ取るときのユーザー名
     pub user: String,
+    /// 認証の方法。"token" (資格情報マネージャーのトークン) / "gh" (GitHub CLI のログインを借りる。GitHub のみ)
+    pub auth: String,
     /// 画面から受け取る新しいトークン (書き込み専用)。保存時に資格情報マネージャーへ移し、
     /// 設定ファイルには書かない。画面にも返さない
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -61,6 +63,9 @@ impl Account {
     /// API を呼ぶときのトークン。資格情報マネージャーから読む。
     /// 資格情報マネージャーに手で登録したものも使えるよう、has_token に関係なく探す
     pub fn resolve_token(&self) -> Result<String, String> {
+        if self.kind == "github" && self.auth == "gh" {
+            return gh::token(&gh::host_of(&self.base_url));
+        }
         if !self.token.trim().is_empty() {
             return Ok(self.token.trim().to_string());
         }
@@ -159,6 +164,10 @@ impl Config {
         for a in &mut c.accounts {
             a.token.clear();
             a.clear_token = false;
+            // 認証の方法を選べるようになる前のアカウントはトークン
+            if a.auth.is_empty() {
+                a.auth = "token".into();
+            }
             if let Ok(found) = secrets::get(&secrets::target(&a.id)) {
                 a.has_token = found.is_some();
             }

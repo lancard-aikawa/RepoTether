@@ -94,6 +94,14 @@ fn read_readme(path: String) -> Result<Option<Readme>, String> {
     Ok(None)
 }
 
+/// GitHub CLI (gh) のログイン状態。ログインしていればアカウント名を返す (トークンは返さない)
+#[tauri::command]
+async fn check_gh(base_url: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || core::gh::user(&core::gh::host_of(&base_url)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// OS の資格情報の保管庫 (Windows: 資格情報マネージャー / macOS: キーチェーンアクセス) を開く
 #[tauri::command]
 fn open_credential_manager() -> Result<(), String> {
@@ -256,7 +264,8 @@ pub fn run() {
             trust_repo,
             save_text_with_dialog,
             open_credential_manager,
-            read_readme
+            read_readme,
+            check_gh
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

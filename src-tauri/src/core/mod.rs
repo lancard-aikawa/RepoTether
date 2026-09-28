@@ -2,6 +2,7 @@
 
 pub mod config;
 pub mod discover;
+pub mod gh;
 pub mod git;
 pub mod model;
 pub mod remote;

@@ -123,6 +123,8 @@ export interface Account {
   label: string;
   baseUrl: string;
   user: string;
+  /** "token": 資格情報マネージャーのトークン / "gh": GitHub CLI のログインを借りる (GitHub のみ) */
+  auth: "token" | "gh";
   /** 新しく入れたトークン (書き込み専用)。バックエンドは返さない */
   token: string;
   /** OS の資格情報の保管庫にトークンがあるか */
