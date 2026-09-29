@@ -21,10 +21,16 @@ export const app = $state({
 export const prefs = $state({
   tab: "state" as Tab,
   includeAutomated: false,
-  /** 状態タブの表示形式 */
-  stateView: "time" as StateViewMode,
-  /** ツリーで畳んでいるノード ("folder:<id>" / "tag:<id>") */
+  /** 状態タブの分類: なし / フォルダ / タグ */
+  stateGroup: "none" as StateGroup,
+  /** 状態タブの見せ方: 一覧 / エクスプローラ (左に木、右に表) */
+  stateLayout: "list" as StateLayout,
+  /** ツリーで畳んでいるノード ("folder:<id>" / "tag:<id>"。エクスプローラの木は "explorer-folder:<id>" など) */
   collapsed: [] as string[],
+  /** エクスプローラ表示で開いている階層 (木のノードの ID。"" はすべて) */
+  explorerNode: "",
+  /** エクスプローラ表示で、下の階層のプロジェクトもまとめて出す */
+  explorerDeep: false,
   /** 詳細パネルで最後に開いたタブ */
   detailTab: "summary" as DetailTab,
   /** 日報の表示: 編集 / 並べて表示 / プレビュー */
@@ -50,7 +56,8 @@ export type ReportViewMode = "edit" | "split" | "preview";
 
 export type DetailTab = "summary" | "git" | "commits" | "claude" | "readme";
 
-export type StateViewMode = "time" | "folder" | "tag";
+export type StateGroup = "none" | "folder" | "tag";
+export type StateLayout = "list" | "explorer";
 export type Theme = "system" | "light" | "dark";
 
 /** テーマと密度を画面に当てる (テーマはウィンドウのタイトルバーにも)。system なら OS の設定に任せる */
@@ -71,7 +78,14 @@ const PREFS_KEY = "repotether.prefs";
 function loadPrefs() {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
-    if (raw) Object.assign(prefs, JSON.parse(raw));
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    // 0.2.0 までの表示形式 (時系列 / フォルダ / タグ) を分類に読み替える
+    if (typeof saved.stateView === "string" && saved.stateGroup == null) {
+      saved.stateGroup = saved.stateView === "time" ? "none" : saved.stateView;
+    }
+    delete saved.stateView;
+    Object.assign(prefs, saved);
   } catch {
     // 読めなければ既定値のまま
   }

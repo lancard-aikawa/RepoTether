@@ -4,7 +4,7 @@
   import { hasLeftovers, leftoverWeight } from "$lib/derive";
   import type { RemoteKind } from "$lib/remotes";
   import { relative, searchKey } from "$lib/format";
-  import { folderTree, tagTree, type TreeNode } from "$lib/tree";
+  import { flatTree, folderTree, tagTree, type TreeNode } from "$lib/tree";
   import {
     allTags,
     app,
@@ -19,9 +19,11 @@
     savePrefs,
     toast,
     toastUndo,
-    type StateViewMode,
+    type StateGroup,
+    type StateLayout,
   } from "$lib/store.svelte";
   import { depthOf, leafOf, MAX_DEPTH, parentOf, usageCount, type Placement } from "$lib/tags";
+  import ExplorerView from "./ExplorerView.svelte";
   import ProjectDetail from "./ProjectDetail.svelte";
   import ProjectRow from "./ProjectRow.svelte";
 
@@ -42,10 +44,15 @@
     { id: "error", label: "読めない" },
   ];
 
-  const views: { id: StateViewMode; label: string }[] = [
-    { id: "time", label: "時系列" },
+  const groups: { id: StateGroup; label: string }[] = [
+    { id: "none", label: "なし" },
     { id: "folder", label: "フォルダ" },
     { id: "tag", label: "タグ" },
+  ];
+
+  const layouts: { id: StateLayout; label: string }[] = [
+    { id: "list", label: "一覧" },
+    { id: "explorer", label: "エクスプローラ" },
   ];
 
   const remoteLabels: Record<Exclude<RemoteFilter, "">, string> = {
@@ -161,14 +168,21 @@
   );
   const starredCount = $derived(projects.filter((p) => p.starred && !p.hidden).length);
 
-  const flat = $derived(prefs.stateView === "time" ? sortProjects(shown) : []);
-  const tree = $derived(
-    prefs.stateView === "folder"
+  const explorer = $derived(prefs.stateLayout === "explorer");
+  /** 分類した木。エクスプローラでは分類なしでも根だけの木を作る */
+  const grouped = $derived(
+    prefs.stateGroup === "folder"
       ? folderTree(shown, sortProjects)
-      : prefs.stateView === "tag"
+      : prefs.stateGroup === "tag"
         ? tagTree(shown, sortProjects, filtering ? [] : allTags())
-        : null,
+        : explorer
+          ? flatTree(shown, sortProjects)
+          : null,
   );
+  const flat = $derived(!explorer && prefs.stateGroup === "none" ? sortProjects(shown) : []);
+  /** 一覧で出す木 (分類があるときだけ) */
+  const tree = $derived(explorer ? null : grouped);
+  const explorerTree = $derived(explorer ? grouped : null);
   // 作っただけで、まだどのプロジェクトにも付けていないタグも数える
   const hasAnyTag = $derived(allTags().length > 0);
 
@@ -176,7 +190,7 @@
 
   // ---- 畳む ----
   const collapsed = $derived(new Set(prefs.collapsed));
-  const cKey = (n: TreeNode) => `${prefs.stateView}:${n.id}`;
+  const cKey = (n: TreeNode) => `${prefs.stateGroup}:${n.id}`;
 
   function toggle(n: TreeNode) {
     const k = cKey(n);
@@ -202,8 +216,16 @@
     query = "";
   }
 
-  function setView(v: StateViewMode) {
-    prefs.stateView = v;
+  function setGroup(g: StateGroup) {
+    if (prefs.stateGroup === g) return;
+    prefs.stateGroup = g;
+    // 開いていた階層は別の木のものなので、エクスプローラは「すべて」に戻す
+    prefs.explorerNode = "";
+    savePrefs();
+  }
+
+  function setLayout(l: StateLayout) {
+    prefs.stateLayout = l;
     savePrefs();
   }
 
@@ -420,15 +442,15 @@
 {#snippet branch(n: TreeNode, depth: number)}
   {#each n.children as c (c.id)}
     {@const open = !collapsed.has(cKey(c))}
-    {@const tagMode = prefs.stateView === "tag" && !c.special}
+    {@const tagMode = prefs.stateGroup === "tag" && !c.special}
     <li
       class="group"
       class:drop={dropId === c.id && dropPos === "into"}
       class:drop-before={dropId === c.id && dropPos === "before"}
       class:drop-after={dropId === c.id && dropPos === "after"}
       style="--depth: {depth}"
-      ondragover={(e) => prefs.stateView === "tag" && overGroup(e, c)}
-      ondrop={(e) => prefs.stateView === "tag" && dropOnGroup(e, c)}
+      ondragover={(e) => prefs.stateGroup === "tag" && overGroup(e, c)}
+      ondrop={(e) => prefs.stateGroup === "tag" && dropOnGroup(e, c)}
     >
       <div
         class="group-head"
@@ -487,8 +509,8 @@
               {now}
               selected={p.key === selectedKey}
               onselect={() => select(p)}
-              showTags={prefs.stateView !== "tag"}
-              ondragstart={prefs.stateView === "tag" ? (e) => startDrag(e, p, c.id) : undefined}
+              showTags={prefs.stateGroup !== "tag"}
+              ondragstart={prefs.stateGroup === "tag" ? (e) => startDrag(e, p, c.id) : undefined}
               ondragend={endDrag}
             />
           {/each}
@@ -513,11 +535,22 @@
     <div class="bar-row">
       <span class="caption">表示</span>
       <div class="controls">
-        <div class="segmented" role="group" aria-label="表示形式">
-          {#each views as v (v.id)}
-            <button class:on={prefs.stateView === v.id} onclick={() => setView(v.id)}>{v.label}</button>
-          {/each}
-        </div>
+        <span class="field">
+          <span class="muted">分類</span>
+          <span class="segmented" role="group" aria-label="分類">
+            {#each groups as g (g.id)}
+              <button class:on={prefs.stateGroup === g.id} onclick={() => setGroup(g.id)}>{g.label}</button>
+            {/each}
+          </span>
+        </span>
+        <span class="field">
+          <span class="muted">見せ方</span>
+          <span class="segmented" role="group" aria-label="見せ方">
+            {#each layouts as l (l.id)}
+              <button class:on={prefs.stateLayout === l.id} onclick={() => setLayout(l.id)}>{l.label}</button>
+            {/each}
+          </span>
+        </span>
         {#if tree}
           <!-- ツリーのときだけ。表示形式のすぐ横に置き、一覧の近くで押せるように -->
           <div class="segmented" role="group" aria-label="ツリーをまとめて開く・畳む">
@@ -534,7 +567,7 @@
             <option value="name">名前順</option>
           </select>
         </label>
-        {#if prefs.stateView === "tag"}
+        {#if prefs.stateGroup === "tag" && !explorer}
           <button class="small" onclick={() => startAdd(null)}>タグを追加</button>
         {/if}
       </div>
@@ -592,9 +625,21 @@
     </div>
   </div>
 <div class="layout">
+  {#if explorerTree}
+    <ExplorerView
+      tree={explorerTree}
+      group={prefs.stateGroup}
+      {now}
+      {sort}
+      onsort={(s) => (sort = s)}
+      {sortProjects}
+      {selectedKey}
+      onselect={(p) => (selectedKey = p.key === selectedKey ? null : p.key)}
+    />
+  {:else}
   <section class="list-pane">
 
-    {#if prefs.stateView === "tag"}
+    {#if prefs.stateGroup === "tag"}
       <p class="hint muted">
         {#if !hasAnyTag}
           タグはまだありません。プロジェクトを選ぶと、右の詳細パネルで「仕事/客先/案件」のように / 区切りで 3 階層まで付けられます。
@@ -633,6 +678,7 @@
       {/if}
     </ul>
   </section>
+  {/if}
 
   {#if selected}
     <ProjectDetail project={selected} {now} onclose={() => select(selected)} />

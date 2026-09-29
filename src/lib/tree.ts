@@ -57,6 +57,13 @@ function finish(n: TreeNode, sortProjects: (xs: Project[]) => Project[], keepOrd
   return n;
 }
 
+/** 分類なし。根にすべてのプロジェクトをぶら下げる (エクスプローラ表示で使う) */
+export function flatTree(projects: Project[], sortProjects: (xs: Project[]) => Project[]): TreeNode {
+  const root = node("", "");
+  root.projects = [...projects];
+  return finish(root, sortProjects);
+}
+
 /**
  * フォルダ (親フォルダ) の階層。1 つの子しか持たない階層は "C:\Repos\mywork" のようにまとめる。
  * パスの無いもの (未クローン) は末尾の入れ物に入れる。

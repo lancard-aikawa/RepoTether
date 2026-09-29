@@ -462,7 +462,7 @@ async function main() {
           window.__mockReadme = readme;
           localStorage.setItem(
             "repotether.prefs",
-            JSON.stringify({ tab: "state", stateView: "time", theme: "system", density: "normal", autoLocalMin: 0, autoRemoteMin: 0, ...prefs }),
+            JSON.stringify({ tab: "state", stateGroup: "none", stateLayout: "list", theme: "system", density: "normal", autoLocalMin: 0, autoRemoteMin: 0, ...prefs }),
           );
         },
         {
@@ -475,7 +475,7 @@ async function main() {
       await page.goto(URL_BASE);
       // マニュアルには「ブラウザ表示」の印を出さない
       await page.addStyleTag({ content: ".status .badge.info { display: none !important; }" });
-      await page.waitForSelector(".list li, .tiles, textarea, .scroll");
+      await page.waitForSelector(".list li, .explorer tbody tr, .tiles, textarea, .scroll");
       await page.waitForTimeout(600);
       return page;
     };
@@ -511,14 +511,19 @@ async function main() {
     await page.keyboard.press("Escape");
     await page.close();
 
-    page = await open({ stateView: "folder" });
+    page = await open({ stateGroup: "folder" });
     await shot(page, "02_state_folder.png");
     await page.close();
 
-    page = await open({ stateView: "tag" });
+    page = await open({ stateGroup: "tag" });
     await shot(page, "03_state_tag.png");
     await page.locator(".group-head", { has: page.locator(".g-label", { hasText: /^ACME$/ }) }).hover();
     await shot(page, "03b_tag_actions.png");
+    await page.close();
+
+    page = await open({ stateGroup: "folder", stateLayout: "explorer", explorerNode: "c:\\repos\\work", explorerDeep: false });
+    await page.locator(".explorer tr.project", { hasText: "invoice-api" }).click();
+    await shot(page, "03c_state_explorer.png");
     await page.close();
 
     // 未クローンとクローン
