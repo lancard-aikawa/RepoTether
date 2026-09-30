@@ -9,34 +9,54 @@ use super::util::{self, git};
 /// 状態のファイル更新時刻を調べる上限 (未追跡が大量にあるリポジトリ対策)
 const MAX_STAT_FILES: usize = 300;
 
-/// .git の中で、git の操作 (コミット・切り替え・add・pull・fetch・stash・ブランチの作成や削除) で
-/// 更新時刻が変わるファイルとフォルダ
-const STAMP_FILES: &[&str] = &[
-    "HEAD",
-    "index",
-    "packed-refs",
-    "FETCH_HEAD",
-    "ORIG_HEAD",
-    "MERGE_HEAD",
-    "logs/HEAD",
-    "refs/stash",
-    "refs/heads",
-    "refs/remotes",
-];
+/// .git (worktree ならその worktree 用のフォルダ) の中で、git の操作で更新時刻が変わるファイル
+const STAMP_FILES: &[&str] = &["HEAD", "index", "FETCH_HEAD", "ORIG_HEAD", "MERGE_HEAD", "logs/HEAD"];
 
-/// .git の中の主なファイルの更新時刻をつないだもの。git を起動しないので軽い。
+/// 共通のフォルダ (worktree でなければ .git と同じ) の中で見るファイル。refs/ の下は別にたどる
+const STAMP_COMMON_FILES: &[&str] = &["packed-refs", "FETCH_HEAD", "reftable/tables.list"];
+
+/// refs/ の下をたどる深さの上限 (refs/remotes/origin/feature/x のような階層のあるブランチ名のため)
+const STAMP_REF_DEPTH: usize = 8;
+
+fn mtime_ns(p: &Path) -> String {
+    util::mtime(p)
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos().to_string())
+        .unwrap_or_default()
+}
+
+/// refs/ とその下のフォルダの更新時刻。ブランチの作成・更新・削除・push・stash は、
+/// ロックファイルを作って置き換えるので、そのファイルがあるフォルダの時刻が変わる
+fn ref_dir_mtimes(dir: &Path, depth: usize, out: &mut Vec<String>) {
+    out.push(mtime_ns(dir));
+    if depth >= STAMP_REF_DEPTH {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut subs: Vec<std::path::PathBuf> =
+        entries.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()).collect();
+    subs.sort();
+    for d in subs {
+        ref_dir_mtimes(&d, depth + 1, out);
+    }
+}
+
+/// .git の中の、git の操作 (コミット・切り替え・add・pull・fetch・push・stash・ブランチの作成や削除) で
+/// 変わるファイルとフォルダの更新時刻をつないだもの。git を起動しないので軽い。
 /// 前回と同じなら、その間に git の操作は無かったとみなせる (作業ツリーのファイルだけの変更は拾えない)
 pub fn stamp(path: &Path) -> Option<String> {
     let dir = discover::git_dir(path)?;
-    let parts: Vec<String> = STAMP_FILES
-        .iter()
-        .map(|f| {
-            util::mtime(&dir.join(f))
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_nanos().to_string())
-                .unwrap_or_default()
+    // worktree では、ブランチなどは commondir が指す本体の .git にある
+    let common = std::fs::read_to_string(dir.join("commondir"))
+        .ok()
+        .map(|s| {
+            let p = std::path::PathBuf::from(s.trim());
+            if p.is_absolute() { p } else { dir.join(p) }
         })
-        .collect();
+        .unwrap_or_else(|| dir.clone());
+    let mut parts: Vec<String> = STAMP_FILES.iter().map(|f| mtime_ns(&dir.join(f))).collect();
+    parts.extend(STAMP_COMMON_FILES.iter().map(|f| mtime_ns(&common.join(f))));
+    ref_dir_mtimes(&common.join("refs"), 0, &mut parts);
     Some(parts.join(","))
 }
 
@@ -420,5 +440,57 @@ mod log_page_tests {
         // 作者で絞る (このリポジトリのコミットは noreply ではない自分のアドレス)
         let none = log_page(root, "x", 0, 5, &["nobody@example.invalid".into()]).unwrap();
         assert!(none.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod stamp_tests {
+    use super::*;
+
+    fn run(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "init.defaultBranch=main"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    /// 操作の前後で stamp が変わるか。更新時刻の粒度に負けないよう、操作の前に少し待つ
+    fn changes(repo: &Path, op: impl FnOnce()) -> bool {
+        let before = stamp(repo);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        op();
+        stamp(repo) != before
+    }
+
+    #[test]
+    fn stamp_notices_git_operations() {
+        let root = std::env::temp_dir().join("repotether-stamp-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let remote = root.join("remote.git");
+        let work = root.join("work");
+        run(&root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+        run(&root, &["init", "-q", work.to_str().unwrap()]);
+        run(&work, &["commit", "-q", "--allow-empty", "-m", "a"]);
+        run(&work, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        run(&work, &["push", "-q", "-u", "origin", "main"]);
+        run(&work, &["commit", "-q", "--allow-empty", "-m", "b"]);
+
+        assert_eq!(stamp(&work), stamp(&work), "何もしなければ同じ");
+        assert!(changes(&work, || run(&work, &["push", "-q"])), "push");
+        run(&work, &["branch", "feature/x"]);
+        assert!(changes(&work, || run(&work, &["branch", "-q", "-D", "feature/x"])), "階層のあるブランチの削除");
+        std::fs::write(work.join("f.txt"), "x").unwrap();
+        run(&work, &["add", "f.txt"]);
+        assert!(changes(&work, || run(&work, &["stash", "-q"])), "stash");
+
+        // worktree: ブランチは本体の .git にあるので、そちらの変化も拾う
+        let wt = root.join("wt");
+        run(&work, &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "side"]);
+        assert!(changes(&wt, || run(&work, &["branch", "-q", "other"])), "worktree から見た本体のブランチの作成");
     }
 }

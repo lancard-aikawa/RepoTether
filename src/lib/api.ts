@@ -301,11 +301,9 @@ function imageType(b: Uint8Array): string | null {
   if (at(0, 0x47, 0x49, 0x46)) return "image/gif";
   if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return "image/webp";
   if (at(0, 0x00, 0x00, 0x01, 0x00)) return "image/x-icon";
-  const head = new TextDecoder().decode(b.subarray(0, 512)).trimStart().toLowerCase();
-  if (head.startsWith("<svg") || (head.startsWith("<?xml") && head.includes("<svg")) || head.includes("<svg")) {
-    return "image/svg+xml";
-  }
-  return null;
+  // SVG は先頭に <?xml や コメントが付くことがあるので、最初の部分に <svg があるかで見る
+  const head = new TextDecoder().decode(b.subarray(0, 512)).toLowerCase();
+  return head.includes("<svg") ? "image/svg+xml" : null;
 }
 
 const iconCache = new Map<string, Promise<string | null>>();
@@ -317,7 +315,11 @@ const iconCache = new Map<string, Promise<string | null>>();
 export function repoIcon(path: string): Promise<string | null> {
   let p = iconCache.get(path);
   if (!p) {
-    p = loadIcon(path).catch(() => null);
+    // 読めなかったとき (ドライブが一時的に見えないなど) は覚えず、次に表示したときにもう一度読む
+    p = loadIcon(path).catch(() => {
+      iconCache.delete(path);
+      return null;
+    });
     iconCache.set(path, p);
   }
   return p;

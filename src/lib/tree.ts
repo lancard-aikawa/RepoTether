@@ -83,7 +83,8 @@ export function folderTree(projects: Project[], sortProjects: (xs: Project[]) =>
     let cur = root;
     let id = "";
     for (const s of segs.slice(0, -1)) {
-      id = id ? `${id}${sep}${s}` : s || "/";
+      // 根 ("/") の直下は区切りを重ねない
+      id = !id ? s || "/" : id === "/" ? `/${s}` : `${id}${sep}${s}`;
       cur = child(cur, id.toLowerCase(), s || "/");
     }
     cur.projects.push(p);

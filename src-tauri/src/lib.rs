@@ -102,10 +102,13 @@ async fn repo_icon(path: String) -> Result<tauri::ipc::Response, String> {
     if !dir.is_absolute() || !dir.is_dir() {
         return Err(format!("フォルダではありません: {path}"));
     }
-    let bytes = match core::icon::find(&dir) {
-        Some(f) => std::fs::read(f).map_err(|e| e.to_string())?,
-        None => vec![],
-    };
+    // 一覧の行の数だけ同時に呼ばれるので、ファイルを探して読む処理は非同期の実行スレッドを塞がないよう別スレッドで
+    let bytes = tauri::async_runtime::spawn_blocking(move || match core::icon::find(&dir) {
+        Some(f) => std::fs::read(f).map_err(|e| e.to_string()),
+        None => Ok(vec![]),
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     Ok(tauri::ipc::Response::new(bytes))
 }
 
@@ -260,15 +263,17 @@ async fn refresh_inner(
     let cfg = state.config.lock().unwrap().clone();
     let cache_dir = state.cache_dir.clone();
     let snapshot_path = state.snapshot_path();
-    let prev = core::load_snapshot(&snapshot_path);
-
     let app2 = app.clone();
     let cfg2 = cfg.clone();
-    let prev2 = prev.clone();
-    let local = tauri::async_runtime::spawn_blocking(move || {
-        core::build_local(&cfg2, &cache_dir, fetch, &scope, prev2.as_ref(), &|m| {
+    let prev_path = snapshot_path.clone();
+    // 前回の結果は、読み直さないリポジトリの引き継ぎと、リモート一覧の引き継ぎの両方に使う。
+    // 別スレッドで読んで使い、複製せずにそのまま返してもらう
+    let (local, prev) = tauri::async_runtime::spawn_blocking(move || {
+        let prev = core::load_snapshot(&prev_path);
+        let local = core::build_local(&cfg2, &cache_dir, fetch, &scope, prev.as_ref(), &|m| {
             let _ = app2.emit("refresh-progress", m);
-        })
+        });
+        (local, prev)
     })
     .await
     .map_err(|e| e.to_string())?;

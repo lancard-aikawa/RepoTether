@@ -34,10 +34,10 @@
 
   const hasTree = $derived(group !== "none");
 
-  /** 選んだノードまでの道筋 (先頭は木の根)。見つからなければ (絞り込みで消えたなど) 根だけ */
-  const trail = $derived.by(() => {
+  /** 木の根から、hit に当たるノードまでの道筋 (先頭は根)。見つからなければ根だけ */
+  function trailOf(hit: (n: TreeNode) => boolean): TreeNode[] {
     const find = (n: TreeNode, path: TreeNode[]): TreeNode[] | null => {
-      if (n.id === prefs.explorerNode) return path;
+      if (hit(n)) return path;
       for (const c of n.children) {
         const r = find(c, [...path, c]);
         if (r) return r;
@@ -45,7 +45,10 @@
       return null;
     };
     return find(tree, [tree]) ?? [tree];
-  });
+  }
+
+  /** 選んだノードまでの道筋。見つからなければ (絞り込みで消えたなど) 根だけ */
+  const trail = $derived(trailOf((n) => n.id === prefs.explorerNode));
   const current = $derived(trail[trail.length - 1]);
 
   /** 下の階層も含めたプロジェクト (タグでは同じものが複数の階層に出るので重複を除く) */
@@ -84,22 +87,10 @@
   /** 階層を開く。左の木でも見えるように、上の階層を開いておく */
   function go(n: TreeNode) {
     prefs.explorerNode = n.id;
-    const path = trailTo(n);
+    const path = trailOf((x) => x === n);
     const open = new Set(path.slice(0, -1).map(cKey));
     prefs.collapsed = prefs.collapsed.filter((k) => !open.has(k));
     savePrefs();
-  }
-
-  function trailTo(target: TreeNode): TreeNode[] {
-    const find = (n: TreeNode, path: TreeNode[]): TreeNode[] | null => {
-      if (n === target) return path;
-      for (const c of n.children) {
-        const r = find(c, [...path, c]);
-        if (r) return r;
-      }
-      return null;
-    };
-    return find(tree, [tree]) ?? [tree];
   }
 
   function setDeep(v: boolean) {

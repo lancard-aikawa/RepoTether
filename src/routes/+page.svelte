@@ -81,7 +81,12 @@
         <button
           onclick={() => refresh(false, { kind: "under", path: f.path })}
           disabled={app.busy}
-          title="{f.path} の下のリポジトリと、Claude のセッションを読み直す">更新 ({f.label} 以下)</button
+          title="{f.path} の下のリポジトリと、Claude のセッションを読み直す">{f.label} 以下を更新</button
+        >
+        <button
+          onclick={() => refresh(false)}
+          disabled={app.busy}
+          title="ローカルのリポジトリをすべてと、Claude のセッションを読み直す">すべて更新</button
         >
       {:else}
         <button

@@ -12,7 +12,7 @@ pub mod secrets;
 pub mod sessions;
 pub mod util;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -75,11 +75,12 @@ pub fn build_local(
     }
 
     let all: Vec<PathBuf> = paths.into_values().collect();
-    let (paths, kept) = split_by_scope(&all, scope, prev, &sessions);
-    let total = paths.len();
+    // fetch は読み直すかどうかに関係なくすべてに対して先にする。fetch で FETCH_HEAD が変われば、
+    // 下の振り分けで .git の変化として拾われて読み直しになる
     if fetch {
-        progress(format!("git fetch しています (0/{total})"));
-        let failed = fetch_parallel(&paths, &|done| progress(format!("git fetch しています ({done}/{total})")));
+        let n = all.len();
+        progress(format!("git fetch しています (0/{n})"));
+        let failed = fetch_parallel(&all, &|done| progress(format!("git fetch しています ({done}/{n})")));
         for (p, e) in failed {
             errors.push(SourceError {
                 source: "fetch".into(),
@@ -87,6 +88,8 @@ pub fn build_local(
             });
         }
     }
+    let (paths, kept) = split_by_scope(&all, scope, prev, &sessions, cfg.history_days);
+    let total = paths.len();
 
     // 読み直さないものがあれば、その件数も出す
     let rest = if kept.is_empty() { String::new() } else { format!("。{} 件は前回のまま", kept.len()) };
@@ -130,18 +133,30 @@ pub fn build_local(
 }
 
 /// scope に従って、git から読み直すパスと、前回の結果を引き継ぐもの (リポジトリとコミット) に分ける。
-/// 前回の結果に無いもの (新しく見つかったもの) は必ず読む
+/// 前回の結果に無いもの (新しく見つかったもの) は必ず読む。
+/// 引き継ぐコミットは、読み直したときと同じく履歴の期間 (history_days) で絞る
 fn split_by_scope(
     paths: &[PathBuf],
     scope: &Scope,
     prev: Option<&Snapshot>,
     sessions: &[Session],
+    history_days: u32,
 ) -> (Vec<PathBuf>, Vec<(LocalRepo, Vec<Commit>)>) {
     let Some(prev) = prev else { return (paths.to_vec(), vec![]) };
+    // 画面のフォルダの ID は小文字なので、大文字・小文字を区別する OS でも比べられるようにそろえる
     let under = match scope {
-        Scope::Under { path } => Some(util::path_key(path)),
+        Scope::Under { path } => Some(util::path_key(path).to_lowercase()),
         _ => None,
     };
+    let repos: HashMap<&str, &LocalRepo> = prev.repos.iter().map(|r| (r.id.as_str(), r)).collect();
+    let mut commits: HashMap<&str, Vec<&Commit>> = HashMap::new();
+    let history_from = chrono::Utc::now() - chrono::Duration::days(i64::from(history_days));
+    for c in &prev.commits {
+        let recent = chrono::DateTime::parse_from_rfc3339(&c.at).is_ok_and(|t| t.with_timezone(&chrono::Utc) >= history_from);
+        if recent {
+            commits.entry(c.repo_id.as_str()).or_default().push(c);
+        }
+    }
     let cutoff = match scope {
         Scope::Active { days } => Some(chrono::Utc::now() - chrono::Duration::days(i64::from(*days))),
         _ => None,
@@ -150,13 +165,13 @@ fn split_by_scope(
     let mut kept = vec![];
     for p in paths {
         let key = util::path_key(&p.to_string_lossy());
-        let Some(old) = prev.repos.iter().find(|r| r.id == key) else {
+        let Some(&old) = repos.get(key.as_str()) else {
             read.push(p.clone());
             continue;
         };
         let keep = match scope {
             Scope::All => false,
-            Scope::Under { .. } => !util::is_under(&key, under.as_deref().unwrap_or_default()),
+            Scope::Under { .. } => !util::is_under(&key.to_lowercase(), under.as_deref().unwrap_or_default()),
             Scope::Active { .. } => {
                 let cutoff = cutoff.expect("Active には cutoff がある");
                 old.error.is_none()
@@ -166,7 +181,7 @@ fn split_by_scope(
             }
         };
         if keep {
-            let cs = prev.commits.iter().filter(|c| c.repo_id == key).cloned().collect();
+            let cs = commits.get(key.as_str()).map(|cs| cs.iter().map(|c| (*c).clone()).collect()).unwrap_or_default();
             kept.push((old.clone(), cs));
         } else {
             read.push(p.clone());
@@ -326,7 +341,11 @@ mod tests {
                 old_repo(&touched, long_ago),
                 old_repo(&chatted, long_ago),
             ],
-            commits: vec![Commit { repo_id: util::path_key(&dormant.to_string_lossy()), ..Default::default() }],
+            commits: vec![
+                Commit { repo_id: util::path_key(&dormant.to_string_lossy()), at: now.clone(), ..Default::default() },
+                // 履歴の期間 (365 日) より古いものは引き継がない
+                Commit { repo_id: util::path_key(&dormant.to_string_lossy()), at: long_ago.into(), ..Default::default() },
+            ],
             ..Default::default()
         };
         // 前回読んだあとに git の操作があった
@@ -340,23 +359,23 @@ mod tests {
         }];
         let paths = vec![dormant.clone(), recent.clone(), touched.clone(), chatted.clone(), fresh.clone()];
 
-        let (read, kept) = split_by_scope(&paths, &Scope::Active { days: 90 }, Some(&prev), &sessions);
+        let (read, kept) = split_by_scope(&paths, &Scope::Active { days: 90 }, Some(&prev), &sessions, 365);
         assert_eq!(keys(&read), ["recent", "touched", "chatted", "fresh"]);
         assert_eq!(kept.len(), 1);
-        assert_eq!(kept[0].1.len(), 1, "引き継ぐリポジトリのコミットも引き継ぐ");
+        assert_eq!(kept[0].1.len(), 1, "引き継ぐリポジトリのコミットも、履歴の期間の分だけ引き継ぐ");
 
-        let (read, kept) = split_by_scope(&paths, &Scope::All, Some(&prev), &sessions);
+        let (read, kept) = split_by_scope(&paths, &Scope::All, Some(&prev), &sessions, 365);
         assert_eq!(read.len(), 5);
         assert!(kept.is_empty());
 
-        // sub の下だけ。前回に無いもの (fresh) は範囲の外でも読む
-        let under = Scope::Under { path: root.join("sub").to_string_lossy().into_owned() };
-        let (read, kept) = split_by_scope(&paths, &under, Some(&prev), &sessions);
+        // sub の下だけ。前回に無いもの (fresh) は範囲の外でも読む。画面から来るパスは小文字
+        let under = Scope::Under { path: root.join("sub").to_string_lossy().to_lowercase() };
+        let (read, kept) = split_by_scope(&paths, &under, Some(&prev), &sessions, 365);
         assert_eq!(keys(&read), ["recent", "fresh"]);
         assert_eq!(kept.len(), 3);
 
         // 前回の結果が無ければすべて読む
-        let (read, _) = split_by_scope(&paths, &Scope::Active { days: 90 }, None, &sessions);
+        let (read, _) = split_by_scope(&paths, &Scope::Active { days: 90 }, None, &sessions, 365);
         assert_eq!(read.len(), 5);
     }
 }
