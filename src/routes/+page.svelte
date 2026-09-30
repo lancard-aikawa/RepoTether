@@ -75,9 +75,21 @@
         >
       {/if}
       {#if !inTauri}<span class="badge info">ブラウザ表示 (読み取りのみ)</span>{/if}
-      <button onclick={() => refresh(false)} disabled={app.busy} title="ローカルのリポジトリと Claude のセッションを読み直す"
-        >更新</button
-      >
+      {#if app.focusFolder && prefs.tab === "state"}
+        {@const f = app.focusFolder}
+        <!-- フォルダ表示で階層を選んでいるときは、その下だけを読み直す (速い) -->
+        <button
+          onclick={() => refresh(false, { kind: "under", path: f.path })}
+          disabled={app.busy}
+          title="{f.path} の下のリポジトリと、Claude のセッションを読み直す">更新 ({f.label} 以下)</button
+        >
+      {:else}
+        <button
+          onclick={() => refresh(false)}
+          disabled={app.busy}
+          title="ローカルのリポジトリをすべてと、Claude のセッションを読み直す">更新</button
+        >
+      {/if}
       <button
         onclick={() => refresh(true)}
         disabled={app.busy || !app.config?.accounts.some((a) => a.enabled)}

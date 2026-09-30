@@ -15,6 +15,8 @@ export const app = $state({
   toastAction: null as { label: string; run: () => void } | null,
   /** 全文を開いているセッション */
   openSession: null as Session | null,
+  /** 状態タブのフォルダ表示で選んでいる階層。あれば「更新」はその下だけを読み直す */
+  focusFolder: null as { path: string; label: string } | null,
 });
 
 /** 画面の好み (その端末だけ)。失われても困らないものだけ置く */
@@ -40,6 +42,8 @@ export const prefs = $state({
   /** 自動更新の間隔 (分)。0 はしない。ローカル = リポジトリ・コミット・セッション、リモート = GitHub / Gogs の一覧 */
   autoLocalMin: 15,
   autoRemoteMin: 60,
+  /** 自動更新 (と起動時) に git から読み直すのは、最近この日数に作業したものだけ。0 はすべて */
+  autoActiveDays: 90,
   /** リモートを更新するとき、各リポジトリで git fetch もする (既定はしない) */
   fetchOnRemote: false,
   /** テーマ: OS に合わせる / ライト / ダーク */
@@ -172,8 +176,8 @@ export function startAutoRefresh(): () => void {
     const due = (min: number, at: string | null | undefined) =>
       min > 0 && (!at || now - Date.parse(at) >= min * 60000);
     // リモートを取るときはローカルも一緒に読み直すので、先に見る
-    if (hasRemoteAccounts() && due(prefs.autoRemoteMin, app.snapshot.remoteFetchedAt)) refresh(true);
-    else if (due(prefs.autoLocalMin, app.snapshot.generatedAt)) refresh(false);
+    if (hasRemoteAccounts() && due(prefs.autoRemoteMin, app.snapshot.remoteFetchedAt)) refresh(true, autoScope());
+    else if (due(prefs.autoLocalMin, app.snapshot.generatedAt)) refresh(false, autoScope());
   };
   const timer = setInterval(check, 30000);
   document.addEventListener("visibilitychange", check);
@@ -194,18 +198,28 @@ export async function init() {
   } catch (e) {
     app.error = errorText(e);
   }
-  // 初回 (キャッシュなし) はリモートも取る
-  await refresh(app.snapshot == null);
+  // 初回 (キャッシュなし) はリモートも取る。前回の結果が無ければ、範囲を絞ってもすべて読む
+  await refresh(app.snapshot == null, autoScope());
 }
 
-export async function refresh(includeRemote: boolean) {
+/** 自動更新と起動時に読み直す範囲: 最近作業したものだけ (設定で「すべて」にもできる) */
+export function autoScope(): api.RefreshScope {
+  return prefs.autoActiveDays > 0 ? { kind: "active", days: prefs.autoActiveDays } : { kind: "all" };
+}
+
+/** 読み直す。scope を省くと (手動の「更新」) すべてのリポジトリを git から読み直す */
+export async function refresh(includeRemote: boolean, scope: api.RefreshScope = { kind: "all" }) {
   if (app.busy) return;
   app.busy = true;
   app.error = "";
-  app.progress = includeRemote ? "リモートも含めて更新しています" : "更新しています";
+  app.progress = includeRemote
+    ? "リモートも含めて更新しています"
+    : scope.kind === "under"
+      ? "選んだフォルダの下を更新しています"
+      : "更新しています";
   try {
     // fetch はリモートを更新するときだけ (ローカルの読み直しは速さを優先)
-    app.snapshot = await api.refresh(includeRemote, includeRemote && prefs.fetchOnRemote);
+    app.snapshot = await api.refresh(includeRemote, includeRemote && prefs.fetchOnRemote, scope);
   } catch (e) {
     app.error = errorText(e);
   } finally {

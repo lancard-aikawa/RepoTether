@@ -9,6 +9,37 @@ use super::util::{self, git};
 /// 状態のファイル更新時刻を調べる上限 (未追跡が大量にあるリポジトリ対策)
 const MAX_STAT_FILES: usize = 300;
 
+/// .git の中で、git の操作 (コミット・切り替え・add・pull・fetch・stash・ブランチの作成や削除) で
+/// 更新時刻が変わるファイルとフォルダ
+const STAMP_FILES: &[&str] = &[
+    "HEAD",
+    "index",
+    "packed-refs",
+    "FETCH_HEAD",
+    "ORIG_HEAD",
+    "MERGE_HEAD",
+    "logs/HEAD",
+    "refs/stash",
+    "refs/heads",
+    "refs/remotes",
+];
+
+/// .git の中の主なファイルの更新時刻をつないだもの。git を起動しないので軽い。
+/// 前回と同じなら、その間に git の操作は無かったとみなせる (作業ツリーのファイルだけの変更は拾えない)
+pub fn stamp(path: &Path) -> Option<String> {
+    let dir = discover::git_dir(path)?;
+    let parts: Vec<String> = STAMP_FILES
+        .iter()
+        .map(|f| {
+            util::mtime(&dir.join(f))
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos().to_string())
+                .unwrap_or_default()
+        })
+        .collect();
+    Some(parts.join(","))
+}
+
 pub fn inspect(path: &Path, history_days: u32) -> (LocalRepo, Vec<Commit>) {
     let display = util::display_path(&path.to_string_lossy());
     let mut repo = LocalRepo {
@@ -18,6 +49,9 @@ pub fn inspect(path: &Path, history_days: u32) -> (LocalRepo, Vec<Commit>) {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| display.clone()),
         path: display,
+        // 読む前に取る。読んでいる間に変わっても、次の回で違いに気付けるように
+        git_stamp: stamp(path),
+        inspected_at: Some(chrono::Local::now().to_rfc3339()),
         ..Default::default()
     };
 

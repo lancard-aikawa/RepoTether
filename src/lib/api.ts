@@ -56,6 +56,8 @@ type MockHooks = {
   __noReadme?: string[];
   __mockGhUser?: string;
   __mockTranscript?: TranscriptEntry[];
+  /** パス → アイコンの URL (data: など) */
+  __mockIcons?: Record<string, string>;
 };
 const hooks = () => (typeof window === "undefined" ? {} : (window as unknown as MockHooks));
 
@@ -93,13 +95,23 @@ export async function loadSnapshot(): Promise<Snapshot | null> {
   return call("load_snapshot");
 }
 
-export async function refresh(includeRemote: boolean, fetch = false): Promise<Snapshot> {
+/**
+ * 更新で git から読み直すリポジトリ。読み直さないものは前回の結果を引き継ぐ。
+ * all = すべて、active = 最近 days 日に作業したものと .git の中が変わったもの、under = path の下のもの
+ */
+export type RefreshScope = { kind: "all" } | { kind: "active"; days: number } | { kind: "under"; path: string };
+
+export async function refresh(
+  includeRemote: boolean,
+  fetch = false,
+  scope: RefreshScope = { kind: "all" },
+): Promise<Snapshot> {
   if (!inTauri) {
     const s = await loadSnapshot();
     if (!s) throw new Error("static/dev-snapshot.json がありません");
     return s;
   }
-  return call("refresh", { includeRemote, fetch });
+  return call("refresh", { includeRemote, fetch, scope });
 }
 
 export async function onProgress(f: (msg: string) => void): Promise<() => void> {
@@ -279,6 +291,44 @@ export async function readReadme(path: string): Promise<Readme | null> {
     };
   }
   return call("read_readme", { path });
+}
+
+/** 画像の中身から種類を見分ける (SVG は種類を付けないと img で出ない) */
+function imageType(b: Uint8Array): string | null {
+  const at = (i: number, ...xs: number[]) => xs.every((x, k) => b[i + k] === x);
+  if (at(0, 0x89, 0x50, 0x4e, 0x47)) return "image/png";
+  if (at(0, 0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (at(0, 0x47, 0x49, 0x46)) return "image/gif";
+  if (at(0, 0x52, 0x49, 0x46, 0x46) && at(8, 0x57, 0x45, 0x42, 0x50)) return "image/webp";
+  if (at(0, 0x00, 0x00, 0x01, 0x00)) return "image/x-icon";
+  const head = new TextDecoder().decode(b.subarray(0, 512)).trimStart().toLowerCase();
+  if (head.startsWith("<svg") || (head.startsWith("<?xml") && head.includes("<svg")) || head.includes("<svg")) {
+    return "image/svg+xml";
+  }
+  return null;
+}
+
+const iconCache = new Map<string, Promise<string | null>>();
+
+/**
+ * プロジェクトのフォルダの中のアプリのアイコン (表示用の URL)。無ければ null。
+ * アイコンはめったに変わらないので、一度読んだものはアプリを閉じるまで覚えておく
+ */
+export function repoIcon(path: string): Promise<string | null> {
+  let p = iconCache.get(path);
+  if (!p) {
+    p = loadIcon(path).catch(() => null);
+    iconCache.set(path, p);
+  }
+  return p;
+}
+
+async function loadIcon(path: string): Promise<string | null> {
+  if (!inTauri) return hooks().__mockIcons?.[path] ?? null;
+  const buf = await call<ArrayBuffer>("repo_icon", { path });
+  const bytes = new Uint8Array(buf);
+  const type = bytes.length ? imageType(bytes) : null;
+  return type ? URL.createObjectURL(new Blob([bytes], { type })) : null;
 }
 
 /** フォルダ選択ダイアログ。キャンセルなら null */

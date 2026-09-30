@@ -53,6 +53,22 @@ pub struct LocalRepo {
     pub last_fetch_at: Option<String>,
     /// 読み取りに失敗したときの理由 (dubious ownership など)
     pub error: Option<String>,
+    /// この状態を git から読んだ時刻。自動更新で読み直さなかったものは前回の時刻のまま
+    pub inspected_at: Option<String>,
+    /// 読んだときの .git の中の主なファイルの更新時刻。変わっていれば git の操作があったとみなして読み直す
+    pub git_stamp: Option<String>,
+}
+
+/// 更新でどのリポジトリを git から読み直すか。読み直さないものは前回の結果を引き継ぐ
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Scope {
+    /// すべて (手動の更新)
+    All,
+    /// 最近 days 日に作業したものと、.git の中が変わったものだけ (自動更新・起動時)
+    Active { days: u32 },
+    /// path の下にあるものだけ (フォルダ表示で階層を選んでの更新)
+    Under { path: String },
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

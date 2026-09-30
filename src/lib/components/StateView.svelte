@@ -15,6 +15,7 @@
     moveTag,
     placeTag,
     prefs,
+    refresh,
     renameTag,
     savePrefs,
     toast,
@@ -481,6 +482,15 @@
               {/if}
               <button class="ghost icon-btn" onclick={() => startRename(c.id)}>名前を変更</button>
               <button class="ghost icon-btn" onclick={() => removeTag(c.id)}>削除</button>
+            </span>
+          {:else if prefs.stateGroup === "folder" && !c.special}
+            <span class="g-actions">
+              <button
+                class="ghost icon-btn"
+                title="{c.label} の下のリポジトリだけを読み直す"
+                disabled={app.busy}
+                onclick={() => refresh(false, { kind: "under", path: c.id })}>この下を更新</button
+              >
             </span>
           {/if}
           <span class="g-when muted">{relative(c.lastActivity, now)}</span>

@@ -181,7 +181,7 @@
     savePrefs();
   }
 
-  function setAuto(k: "autoLocalMin" | "autoRemoteMin", v: number) {
+  function setAuto(k: "autoLocalMin" | "autoRemoteMin" | "autoActiveDays", v: number) {
     prefs[k] = v;
     savePrefs();
   }
@@ -560,7 +560,22 @@
             {#each [0, 15, 30, 60, 180] as m (m)}<option value={m}>{m ? `${m} 分ごと` : "しない"}</option>{/each}
           </select>
         </label>
+        <label class="field">
+          読み直す範囲
+          <select
+            value={prefs.autoActiveDays}
+            onchange={(e) => setAuto("autoActiveDays", Number(e.currentTarget.value))}
+          >
+            {#each [30, 90, 180, 365] as d (d)}<option value={d}>最近 {d} 日に作業したもの</option>{/each}
+            <option value={0}>すべて</option>
+          </select>
+        </label>
       </div>
+      <p class="note">
+        自動更新と起動時は、最近作業したものと、git の操作 (コミット・切り替え・pull など) があったものだけを git から読み直し、
+        ほかは前回の結果を使います。git を使わずにファイルだけを書き換えた古いリポジトリは、上の「更新」ボタンを押すまで反映されません
+        (「更新」はすべてを読み直します)。
+      </p>
       <label class="check">
         <input type="checkbox" checked={prefs.fetchOnRemote} onchange={(e) => setFetch(e.currentTarget.checked)} />
         リモートを更新するとき、各リポジトリで <code>git fetch</code> もする

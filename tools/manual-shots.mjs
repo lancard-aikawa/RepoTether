@@ -185,6 +185,28 @@ const README = {
   ].join("\n"),
 };
 
+// アプリのアイコンの見本 (フォルダの中にアイコンがあるプロジェクト)。無いものは頭文字のアイコンになる
+const svgIcon = (bg, body) =>
+  "data:image/svg+xml," +
+  encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${bg}"/>${body}</svg>`);
+const ICONS = {
+  // カート
+  "C:\\Repos\\work\\shop-frontend": svgIcon(
+    "#2f7d5b",
+    `<path d="M12 18h6l6 22h22l5-16H21" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/><circle cx="27" cy="47" r="3.5" fill="#fff"/><circle cx="43" cy="47" r="3.5" fill="#fff"/>`,
+  ),
+  // カメラ
+  "C:\\Repos\\mywork\\photo-organizer": svgIcon(
+    "#c0613a",
+    `<rect x="12" y="22" width="40" height="28" rx="5" fill="#fff"/><rect x="24" y="16" width="16" height="8" rx="2" fill="#fff"/><circle cx="32" cy="36" r="8" fill="#c0613a"/>`,
+  ),
+  // 時計
+  "C:\\Repos\\mywork\\cli-timer": svgIcon(
+    "#3b5bb5",
+    `<circle cx="32" cy="34" r="17" fill="none" stroke="#fff" stroke-width="4"/><path d="M32 24v11l7 5" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/>`,
+  ),
+};
+
 // 会話の全文の見本 (photo-organizer の直前のセッション)
 const TRANSCRIPT = [
   { role: "user", text: "EXIF の撮影日で年月フォルダに振り分けたい" },
@@ -455,11 +477,12 @@ async function main() {
       page.setDefaultTimeout(8000);
       await page.route("**/dev-snapshot.json", (route) => route.fulfill({ json: snapshot }));
       await page.addInitScript(
-        ({ config, readme, prefs, transcript }) => {
+        ({ config, readme, prefs, transcript, icons }) => {
           window.__mockConfig = config;
           window.__mockGhUser = "demo-user";
           window.__mockTranscript = transcript;
           window.__mockReadme = readme;
+          window.__mockIcons = icons;
           localStorage.setItem(
             "repotether.prefs",
             JSON.stringify({ tab: "state", stateGroup: "none", stateLayout: "list", theme: "system", density: "normal", autoLocalMin: 0, autoRemoteMin: 0, ...prefs }),
@@ -468,6 +491,7 @@ async function main() {
         {
           config,
           readme: README,
+          icons: ICONS,
           prefs,
           transcript: TRANSCRIPT.map((e, i) => ({ at: transcriptTimes[i], tools: [], ...e })),
         },

@@ -5,6 +5,7 @@ pub mod config;
 pub mod discover;
 pub mod gh;
 pub mod git;
+pub mod icon;
 pub mod model;
 pub mod remote;
 pub mod secrets;
@@ -17,12 +18,21 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 use config::Config;
-use model::{Commit, LocalRepo, RemoteRepo, Session, Snapshot, SourceError};
+use model::{Commit, LocalRepo, RemoteRepo, Scope, Session, Snapshot, SourceError};
 
 /// ローカル側 (リポジトリ・コミット・セッション) を読み直す。リモート一覧は含めない。
 /// progress には「何をしているか」の短い文を渡す。
 /// fetch が真なら、状態を読む前に各リポジトリで git fetch する (ahead / behind を最新にする)。
-pub fn build_local(cfg: &Config, cache_dir: &Path, fetch: bool, progress: &(dyn Fn(String) + Sync)) -> Snapshot {
+/// scope で git から読み直すリポジトリを絞れる。読み直さないものは prev (前回の結果) から引き継ぐ。
+/// セッションとリポジトリの一覧は毎回すべて読む (どちらも軽い)。
+pub fn build_local(
+    cfg: &Config,
+    cache_dir: &Path,
+    fetch: bool,
+    scope: &Scope,
+    prev: Option<&Snapshot>,
+    progress: &(dyn Fn(String) + Sync),
+) -> Snapshot {
     let mut errors: Vec<SourceError> = vec![];
 
     progress("Claude のセッションを読んでいます".into());
@@ -64,7 +74,8 @@ pub fn build_local(cfg: &Config, cache_dir: &Path, fetch: bool, progress: &(dyn 
         }
     }
 
-    let paths: Vec<PathBuf> = paths.into_values().collect();
+    let all: Vec<PathBuf> = paths.into_values().collect();
+    let (paths, kept) = split_by_scope(&all, scope, prev, &sessions);
     let total = paths.len();
     if fetch {
         progress(format!("git fetch しています (0/{total})"));
@@ -77,14 +88,16 @@ pub fn build_local(cfg: &Config, cache_dir: &Path, fetch: bool, progress: &(dyn 
         }
     }
 
-    progress(format!("git の状態を読んでいます (0/{total})"));
+    // 読み直さないものがあれば、その件数も出す
+    let rest = if kept.is_empty() { String::new() } else { format!("。{} 件は前回のまま", kept.len()) };
+    progress(format!("git の状態を読んでいます (0/{total}{rest})"));
     let results = inspect_parallel(&paths, cfg.history_days, &|done| {
-        progress(format!("git の状態を読んでいます ({done}/{total})"));
+        progress(format!("git の状態を読んでいます ({done}/{total}{rest})"));
     });
 
     let mut repos: Vec<LocalRepo> = vec![];
     let mut commits: Vec<Commit> = vec![];
-    for (repo, cs) in results {
+    for (repo, cs) in results.into_iter().chain(kept) {
         repos.push(repo);
         commits.extend(cs);
     }
@@ -114,6 +127,66 @@ pub fn build_local(cfg: &Config, cache_dir: &Path, fetch: bool, progress: &(dyn 
         remote_repos: vec![],
         errors,
     }
+}
+
+/// scope に従って、git から読み直すパスと、前回の結果を引き継ぐもの (リポジトリとコミット) に分ける。
+/// 前回の結果に無いもの (新しく見つかったもの) は必ず読む
+fn split_by_scope(
+    paths: &[PathBuf],
+    scope: &Scope,
+    prev: Option<&Snapshot>,
+    sessions: &[Session],
+) -> (Vec<PathBuf>, Vec<(LocalRepo, Vec<Commit>)>) {
+    let Some(prev) = prev else { return (paths.to_vec(), vec![]) };
+    let under = match scope {
+        Scope::Under { path } => Some(util::path_key(path)),
+        _ => None,
+    };
+    let cutoff = match scope {
+        Scope::Active { days } => Some(chrono::Utc::now() - chrono::Duration::days(i64::from(*days))),
+        _ => None,
+    };
+    let mut read = vec![];
+    let mut kept = vec![];
+    for p in paths {
+        let key = util::path_key(&p.to_string_lossy());
+        let Some(old) = prev.repos.iter().find(|r| r.id == key) else {
+            read.push(p.clone());
+            continue;
+        };
+        let keep = match scope {
+            Scope::All => false,
+            Scope::Under { .. } => !util::is_under(&key, under.as_deref().unwrap_or_default()),
+            Scope::Active { .. } => {
+                let cutoff = cutoff.expect("Active には cutoff がある");
+                old.error.is_none()
+                    && old.inspected_at.is_some()
+                    && !worked_since(old, sessions, cutoff)
+                    && git::stamp(p) == old.git_stamp
+            }
+        };
+        if keep {
+            let cs = prev.commits.iter().filter(|c| c.repo_id == key).cloned().collect();
+            kept.push((old.clone(), cs));
+        } else {
+            read.push(p.clone());
+        }
+    }
+    (read, kept)
+}
+
+/// cutoff より後に作業したか (ローカルの最新コミット・未コミットのファイルの更新・そのフォルダでの Claude のセッション)
+fn worked_since(repo: &LocalRepo, sessions: &[Session], cutoff: chrono::DateTime<chrono::Utc>) -> bool {
+    let after = |s: Option<&str>| {
+        s.and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .is_some_and(|t| t.with_timezone(&chrono::Utc) >= cutoff)
+    };
+    after(repo.last_commit_at.as_deref())
+        || after(repo.dirty_modified_at.as_deref())
+        || sessions.iter().any(|s| {
+            s.cwd.as_deref().is_some_and(|c| util::is_under(&util::path_key(c), &repo.id))
+                && (after(s.ended_at.as_deref()) || after(s.started_at.as_deref()))
+        })
 }
 
 /// remote のあるリポジトリで並列に fetch する。失敗したものを返す
@@ -150,7 +223,7 @@ fn inspect_parallel(
     let next = AtomicUsize::new(0);
     let done = AtomicUsize::new(0);
     let out: Mutex<Vec<(LocalRepo, Vec<Commit>)>> = Mutex::new(Vec::with_capacity(paths.len()));
-    let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 8);
+    let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).clamp(2, 16);
     std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| loop {
@@ -207,3 +280,83 @@ pub fn save_snapshot(path: &Path, snap: &Snapshot) -> Result<(), String> {
     std::fs::write(path, serde_json::to_string(snap).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// .git/HEAD だけある、見かけ上のリポジトリを作る
+    fn fake_repo(root: &Path, name: &str) -> PathBuf {
+        let p = root.join(name);
+        std::fs::create_dir_all(p.join(".git")).unwrap();
+        std::fs::write(p.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        p
+    }
+
+    fn old_repo(p: &Path, last_commit: &str) -> LocalRepo {
+        LocalRepo {
+            id: util::path_key(&p.to_string_lossy()),
+            path: p.to_string_lossy().into_owned(),
+            last_commit_at: Some(last_commit.into()),
+            inspected_at: Some("2026-01-01T00:00:00+09:00".into()),
+            git_stamp: git::stamp(p),
+            ..Default::default()
+        }
+    }
+
+    fn keys(ps: &[PathBuf]) -> Vec<String> {
+        ps.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect()
+    }
+
+    #[test]
+    fn scope_decides_what_to_read() {
+        let root = std::env::temp_dir().join("repotether-scope-test");
+        let _ = std::fs::remove_dir_all(&root);
+        let dormant = fake_repo(&root, "dormant");
+        let recent = fake_repo(&root.join("sub"), "recent");
+        let touched = fake_repo(&root, "touched");
+        let chatted = fake_repo(&root, "chatted");
+        let fresh = fake_repo(&root, "fresh");
+        let long_ago = "2020-01-01T00:00:00+09:00";
+        let now = chrono::Utc::now().to_rfc3339();
+        let prev = Snapshot {
+            repos: vec![
+                old_repo(&dormant, long_ago),
+                old_repo(&recent, &now),
+                old_repo(&touched, long_ago),
+                old_repo(&chatted, long_ago),
+            ],
+            commits: vec![Commit { repo_id: util::path_key(&dormant.to_string_lossy()), ..Default::default() }],
+            ..Default::default()
+        };
+        // 前回読んだあとに git の操作があった
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(touched.join(".git/HEAD"), "ref: refs/heads/other\n").unwrap();
+        // 最近 Claude と作業した (サブフォルダで)
+        let sessions = vec![Session {
+            cwd: Some(chatted.join("src").to_string_lossy().into_owned()),
+            started_at: Some(now.clone()),
+            ..Default::default()
+        }];
+        let paths = vec![dormant.clone(), recent.clone(), touched.clone(), chatted.clone(), fresh.clone()];
+
+        let (read, kept) = split_by_scope(&paths, &Scope::Active { days: 90 }, Some(&prev), &sessions);
+        assert_eq!(keys(&read), ["recent", "touched", "chatted", "fresh"]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].1.len(), 1, "引き継ぐリポジトリのコミットも引き継ぐ");
+
+        let (read, kept) = split_by_scope(&paths, &Scope::All, Some(&prev), &sessions);
+        assert_eq!(read.len(), 5);
+        assert!(kept.is_empty());
+
+        // sub の下だけ。前回に無いもの (fresh) は範囲の外でも読む
+        let under = Scope::Under { path: root.join("sub").to_string_lossy().into_owned() };
+        let (read, kept) = split_by_scope(&paths, &under, Some(&prev), &sessions);
+        assert_eq!(keys(&read), ["recent", "fresh"]);
+        assert_eq!(kept.len(), 3);
+
+        // 前回の結果が無ければすべて読む
+        let (read, _) = split_by_scope(&paths, &Scope::Active { days: 90 }, None, &sessions);
+        assert_eq!(read.len(), 5);
+    }
+}

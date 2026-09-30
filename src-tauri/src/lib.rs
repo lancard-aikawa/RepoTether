@@ -94,6 +94,21 @@ fn read_readme(path: String) -> Result<Option<Readme>, String> {
     Ok(None)
 }
 
+/// プロジェクトのアイコン (フォルダの中のアプリのアイコンらしい画像) の中身。無ければ空。
+/// 画像の種類は画面の側で中身から見分ける
+#[tauri::command]
+async fn repo_icon(path: String) -> Result<tauri::ipc::Response, String> {
+    let dir = PathBuf::from(&path);
+    if !dir.is_absolute() || !dir.is_dir() {
+        return Err(format!("フォルダではありません: {path}"));
+    }
+    let bytes = match core::icon::find(&dir) {
+        Some(f) => std::fs::read(f).map_err(|e| e.to_string())?,
+        None => vec![],
+    };
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
 /// 詳細パネルの「次の 10 件」: 期間に関係なく、skip 件目から limit 件のコミット。
 /// mine_only なら設定の「自分のメールアドレス」のものだけ
 #[tauri::command]
@@ -217,28 +232,41 @@ fn load_snapshot(state: State<AppState>) -> Option<Snapshot> {
 }
 
 /// ローカルを読み直す。include_remote ならリモート一覧も取り直し、そうでなければ前回分を引き継ぐ。
-/// 進み具合は "refresh-progress" イベントで送る。
+/// scope で git から読み直すリポジトリを絞れる (省略ならすべて)。進み具合は "refresh-progress" イベントで送る。
 #[tauri::command]
-async fn refresh(app: AppHandle, include_remote: bool, fetch: Option<bool>) -> Result<Snapshot, String> {
+async fn refresh(
+    app: AppHandle,
+    include_remote: bool,
+    fetch: Option<bool>,
+    scope: Option<core::model::Scope>,
+) -> Result<Snapshot, String> {
     let state = app.state::<AppState>();
     if state.refreshing.swap(true, Ordering::SeqCst) {
         return Err("更新中です".into());
     }
-    let result = refresh_inner(&app, include_remote, fetch.unwrap_or(false)).await;
+    let scope = scope.unwrap_or(core::model::Scope::All);
+    let result = refresh_inner(&app, include_remote, fetch.unwrap_or(false), scope).await;
     state.refreshing.store(false, Ordering::SeqCst);
     result
 }
 
-async fn refresh_inner(app: &AppHandle, include_remote: bool, fetch: bool) -> Result<Snapshot, String> {
+async fn refresh_inner(
+    app: &AppHandle,
+    include_remote: bool,
+    fetch: bool,
+    scope: core::model::Scope,
+) -> Result<Snapshot, String> {
     let state = app.state::<AppState>();
     let cfg = state.config.lock().unwrap().clone();
     let cache_dir = state.cache_dir.clone();
     let snapshot_path = state.snapshot_path();
+    let prev = core::load_snapshot(&snapshot_path);
 
     let app2 = app.clone();
     let cfg2 = cfg.clone();
+    let prev2 = prev.clone();
     let local = tauri::async_runtime::spawn_blocking(move || {
-        core::build_local(&cfg2, &cache_dir, fetch, &|m| {
+        core::build_local(&cfg2, &cache_dir, fetch, &scope, prev2.as_ref(), &|m| {
             let _ = app2.emit("refresh-progress", m);
         })
     })
@@ -254,7 +282,7 @@ async fn refresh_inner(app: &AppHandle, include_remote: bool, fetch: bool) -> Re
         s.remote_fetched_at = Some(chrono::Local::now().to_rfc3339());
         s
     } else {
-        core::carry_remote(local, core::load_snapshot(&snapshot_path).as_ref())
+        core::carry_remote(local, prev.as_ref())
     };
     core::save_snapshot(&snapshot_path, &snap)?;
     Ok(snap)
@@ -368,6 +396,7 @@ pub fn run() {
             save_text_with_dialog,
             open_credential_manager,
             read_readme,
+            repo_icon,
             check_gh,
             list_terminals,
             repo_log,

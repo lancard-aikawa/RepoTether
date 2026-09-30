@@ -3,10 +3,11 @@
   // 分類なしのときは木を出さず、すべてを 1 枚の表で出す。
   import type { Project } from "$lib/derive";
   import { relative } from "$lib/format";
-  import { prefs, savePrefs, type StateGroup } from "$lib/store.svelte";
+  import { app, prefs, savePrefs, type StateGroup } from "$lib/store.svelte";
   import type { TreeNode } from "$lib/tree";
   import ProjectActions from "./ProjectActions.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
+  import RepoIcon from "./RepoIcon.svelte";
   import StarButton from "./StarButton.svelte";
 
   type Sort = "recent" | "stale" | "weight" | "name";
@@ -57,6 +58,15 @@
     visit(n);
     return sortProjects([...seen.values()]);
   }
+
+  // フォルダで分類して階層を選んでいるときは、上の「更新」をその下だけにする
+  $effect(() => {
+    app.focusFolder =
+      group === "folder" && current.id && !current.special ? { path: current.id, label: current.label } : null;
+    return () => {
+      app.focusFolder = null;
+    };
+  });
 
   const folders = $derived(prefs.explorerDeep ? [] : current.children);
   const items = $derived(prefs.explorerDeep ? allUnder(current) : current.projects);
@@ -244,6 +254,7 @@ ${n.total} 件 (取り残しのあるもの ${n.leftovers} 件)`;
             >
               <td class="c-star"><span class="star-slot" class:starred={p.starred}><StarButton project={p} /></span></td>
               <td class="c-name">
+                <RepoIcon name={p.name} path={p.path} />
                 <span class="name">{p.name}</span>
                 <RemoteBadges links={p.links} showPath={false} showNone={p.kind === "local" && !p.local?.error} />
                 {#if p.kind === "folder"}<span class="host">git 以外</span>{/if}
@@ -540,6 +551,10 @@ ${n.total} 件 (取り残しのあるもの ${n.leftovers} 件)`;
   .c-name {
     min-width: 180px;
     white-space: nowrap;
+  }
+
+  .c-name :global(.icon) {
+    margin-right: 6px;
   }
 
   .c-branch {

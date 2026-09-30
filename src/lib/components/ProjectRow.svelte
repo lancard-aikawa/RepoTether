@@ -4,6 +4,7 @@
   import { errorText, setHidden, toast } from "$lib/store.svelte";
   import ProjectActions from "./ProjectActions.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
+  import RepoIcon from "./RepoIcon.svelte";
   import StarButton from "./StarButton.svelte";
 
   let {
@@ -72,6 +73,7 @@
   >
     <div class="line1">
       <span class="star-slot" class:starred={p.starred}><StarButton project={p} /></span>
+      <RepoIcon name={p.name} path={p.path} />
       <span class="name">{p.name}</span>
       <RemoteBadges links={p.links} showNone={p.kind === "local" && !p.local?.error} />
       {#if p.kind === "folder"}<span class="host">git 以外</span>{/if}
