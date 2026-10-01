@@ -180,6 +180,25 @@ async fn session_transcript(
         .map_err(|e| e.to_string())?
 }
 
+/// SessionVault の verify で、セッションのログが壊れていないかを検査する (読むだけ)。
+/// project_dirs はログのあるフォルダの名前 (Session.project_dir)。空なら何も検査しない
+#[tauri::command]
+async fn sessionvault_verify(
+    state: State<'_, AppState>,
+    project_dirs: Vec<String>,
+) -> Result<Vec<core::model::SessionFinding>, String> {
+    let (exe, dir) = {
+        let c = state.config.lock().unwrap();
+        (c.sessionvault_path.clone(), c.claude_projects_dir().ok_or("Claude のログの場所が分かりません")?)
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let exe = core::sessionvault::resolve_exe(exe.as_deref())?;
+        core::sessionvault::verify(&exe, &dir, &project_dirs)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ClaudeRetention {
@@ -408,6 +427,7 @@ pub fn run() {
             claude_open,
             claude_resume,
             session_transcript,
+            sessionvault_verify,
             get_claude_retention,
             set_claude_retention
         ])

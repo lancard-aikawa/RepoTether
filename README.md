@@ -17,7 +17,8 @@
   Claude / git / 変更の時刻、直前の Claude セッション。フォルダ / 自分で付けるタグ (3 階層) で分類でき、一覧のほか、
   左に木・右に表のエクスプローラ形式でも見られる。
   スター・絞り込み・詳細パネル (リポジトリ / コミット / Claude / README) がある。VS Code・端末・エクスプローラー・Claude で開ける
-- **Claude** — セッションの会話の全文を読み、端末で `claude -r` を動かして続きから再開できる
+- **Claude** — セッションの会話の全文を読み、端末で `claude -r` を動かして続きから再開できる。
+  SessionVault があれば、セッションのログが壊れていないかを検査できる (読むだけ)
 - **履歴** — コミットと Claude セッションを日ごとに並べる
 - **グラフ** — 日ごとのカレンダー、週ごとの棒、プロジェクト × 週、止まっているプロジェクト
 - **日報** — 日報 / 週報の Markdown をプレビューを見ながら手直しし、コピー・保存
@@ -84,6 +85,7 @@ src-tauri/src/
     discover.rs     リポジトリを探す
     git.rs          git の状態・コミット・fetch・クローン
     sessions.rs     Claude のセッションの要約とキャッシュ
+    sessionvault.rs SessionVault の verify を呼んでログを検査する (読むだけ)
     remote.rs       GitHub / Gogs / Gitea の一覧
     gh.rs           GitHub CLI のログインを借りる
     secrets.rs      トークンの保存

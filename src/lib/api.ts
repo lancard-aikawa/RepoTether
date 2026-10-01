@@ -2,7 +2,7 @@
 // ブラウザで `pnpm dev` だけを開いたとき (Tauri の外) は、static/dev-snapshot.json を読む表示確認用のモードになる。
 // dev-snapshot.json は `cargo run --example dump -- ../static/dev-snapshot.json` で作る (git には入れない)。
 
-import type { Commit, Config, Snapshot, TranscriptEntry } from "./types";
+import type { Commit, Config, SessionFinding, Snapshot, TranscriptEntry } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -47,6 +47,7 @@ const mockConfig: Config = {
   tags: {},
   tagDefs: [],
   starred: [],
+  sessionvaultPath: null,
 };
 
 /** ブラウザ表示の確認用に、外から差し込める値 (tools/manual-shots.mjs がマニュアルの画面を撮るときに使う) */
@@ -56,6 +57,7 @@ type MockHooks = {
   __noReadme?: string[];
   __mockGhUser?: string;
   __mockTranscript?: TranscriptEntry[];
+  __mockFindings?: SessionFinding[];
   /** パス → アイコンの URL (data: など) */
   __mockIcons?: Record<string, string>;
 };
@@ -172,6 +174,21 @@ export async function sessionTranscript(sessionId: string): Promise<TranscriptEn
     ];
   }
   return call("session_transcript", { sessionId });
+}
+
+/** SessionVault でセッションのログを検査する (読むだけ)。projectDirs はログのあるフォルダの名前 */
+export async function sessionvaultVerify(projectDirs: string[]): Promise<SessionFinding[]> {
+  if (!inTauri) return hooks().__mockFindings ?? [];
+  return call("sessionvault_verify", { projectDirs });
+}
+
+/** ファイル選択ダイアログ。キャンセルなら null */
+export async function pickFile(title: string, defaultPath?: string, extensions?: string[]): Promise<string | null> {
+  if (!inTauri) return window.prompt(title, defaultPath ?? "") || null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const filters = extensions ? [{ name: extensions.join(", "), extensions }] : undefined;
+  const r = await open({ directory: false, multiple: false, title, defaultPath, filters });
+  return typeof r === "string" ? r : null;
 }
 
 export interface TerminalChoice {

@@ -74,6 +74,21 @@ export interface Session {
   promptCount: number;
   promptTimes: string[];
   gitBranch: string | null;
+  /** ログのあるフォルダの名前 (~/.claude/projects/<これ>/)。SessionVault の検査に渡す */
+  projectDir: string | null;
+}
+
+/** SessionVault の verify が返す 1 件 */
+export interface SessionFinding {
+  session: string | null;
+  /** ログのあるフォルダの名前 */
+  project: string;
+  path: string;
+  /** bad-json / truncated-tail / no-newline / dangling-parent / duplicate-uuid / diverged / src-missing / unreadable */
+  check: string;
+  severity: "error" | "warning" | "info";
+  line: number | null;
+  detail: string;
 }
 
 /** セッションの会話の 1 件 (全文を見る) */
@@ -124,6 +139,8 @@ export interface Config {
   tagDefs: string[];
   /** スター (お気に入り) を付けたプロジェクトの設定キー */
   starred: string[];
+  /** sessionvault.exe の場所。null なら PATH から探す */
+  sessionvaultPath: string | null;
 }
 
 export type AccountKind = "github" | "gogs" | "gitea";

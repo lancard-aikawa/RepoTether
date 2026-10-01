@@ -131,6 +131,28 @@ pub struct Session {
     /// 人が入力したプロンプトの時刻。日ごとの集計に使う
     pub prompt_times: Vec<String>,
     pub git_branch: Option<String>,
+    /// ログのあるフォルダの名前 (~/.claude/projects/<これ>/)。作業フォルダのパスを Claude Code が変換したもの。
+    /// SessionVault の verify --project に渡す
+    #[serde(default)]
+    pub project_dir: Option<String>,
+}
+
+/// SessionVault の `verify --json` が返す 1 件
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionFinding {
+    pub session: Option<String>,
+    /// ログのあるフォルダの名前
+    pub project: String,
+    /// そのフォルダからの相対パス
+    pub path: String,
+    /// bad-json / truncated-tail / no-newline / dangling-parent / duplicate-uuid / diverged / src-missing / unreadable
+    pub check: String,
+    /// error / warning / info
+    pub severity: String,
+    /// 1 始まり
+    pub line: Option<u32>,
+    pub detail: String,
 }
 
 /// セッションの会話の 1 件 (詳細の「全文を見る」)。Claude の返答は、続けて届いた記録を 1 件にまとめる

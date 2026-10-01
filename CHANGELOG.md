@@ -3,6 +3,13 @@
 <!-- 見出しは `## <版番号>` の形にすること (release.yml がこの節を Release の本文に使う)。
      まだ出していない変更は「## 未公開」に書き、リリースのときに版番号へ書き換える -->
 
+## 未公開
+
+- 詳細パネルの Claude タブに「ログの検査」。SessionVault (Claude Code のログを残し・検査する CLI) の
+  `verify` で、そのプロジェクトのセッションのログに読めない行・途中で切れた行・切れた会話のつながりが無いか、
+  SessionVault の保管庫の版と食い違っていないかを調べる。押したときだけ動き、ログは書き換えない
+- 設定「表示・その他」に「SessionVault の場所」。空なら PATH の sessionvault.exe を使う
+
 ## 0.4.0
 
 - プロジェクトにアイコンを付ける。フォルダの中にアプリのアイコン (Tauri / Flutter / Android / Electron / Next.js の

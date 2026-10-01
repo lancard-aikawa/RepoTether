@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Project } from "$lib/derive";
-  import type { Commit } from "$lib/types";
+  import type { Commit, SessionFinding } from "$lib/types";
   import { formatDateTime, formatTime, relative, toMs, dayKey, formatDayLabel } from "$lib/format";
   import * as api from "$lib/api";
   import {
@@ -134,6 +134,53 @@
     commitLimit = 50;
   });
   const sessions = $derived(project.sessions.slice(0, sessionLimit));
+
+  // ---- セッションのログの検査 (SessionVault)。10 秒近くかかるので、押したときだけ ----
+  type CheckState =
+    | { state: "idle" }
+    | { state: "running" }
+    | { state: "done"; findings: SessionFinding[]; at: number }
+    | { state: "error"; message: string };
+  let check = $state<CheckState>({ state: "idle" });
+  // サブフォルダで始めた会話は別のフォルダに入るので、このプロジェクトのセッションのフォルダをすべて渡す
+  const projectDirs = $derived([...new Set(project.sessions.map((s) => s.projectDir).filter((d): d is string => !!d))]);
+  $effect(() => {
+    void project.key;
+    check = { state: "idle" };
+  });
+
+  async function runCheck() {
+    const key = project.key;
+    check = { state: "running" };
+    try {
+      const findings = await api.sessionvaultVerify(projectDirs);
+      if (project.key === key) check = { state: "done", findings, at: Date.now() };
+    } catch (e) {
+      if (project.key === key) check = { state: "error", message: errorText(e) };
+    }
+  }
+
+  const CHECK_LABEL: Record<string, string> = {
+    "bad-json": "読めない行",
+    "truncated-tail": "最後の行が途中まで",
+    "no-newline": "末尾に改行が無い",
+    "dangling-parent": "会話のつながりが切れている",
+    "duplicate-uuid": "同じ記録が 2 回",
+    diverged: "保管庫の版と食い違う",
+    "src-missing": "Claude Code から消えた (保管庫にはある)",
+    unreadable: "開けない",
+  };
+  const SEVERITY_BADGE: Record<string, string> = { error: "high", warning: "mid", info: "info" };
+  const SEVERITY_LABEL: Record<string, string> = { error: "エラー", warning: "警告", info: "情報" };
+  const sessionTitle = (id: string | null) =>
+    (id && project.sessions.find((s) => s.id === id)?.title) || (id ? id.slice(0, 8) + "…" : "(セッション外)");
+  const findingCounts = $derived.by(() => {
+    if (check.state !== "done") return [];
+    const found = check.findings;
+    return (["error", "warning", "info"] as const)
+      .map((sev) => [sev, found.filter((f) => f.severity === sev).length] as const)
+      .filter(([, n]) => n > 0);
+  });
   const commitSource = $derived(showAllCommits ? project.commits : project.myCommits);
   const commits = $derived(commitSource.slice(0, commitLimit));
 
@@ -356,6 +403,44 @@
     {/if}
 
     {#if tab === "claude"}
+      <section>
+        <h3>
+          ログの検査
+          <button class="small-btn" onclick={runCheck} disabled={check.state === "running" || projectDirs.length === 0}>
+            {check.state === "running" ? "検査中…" : check.state === "done" ? "もう一度" : "検査する"}
+          </button>
+        </h3>
+        {#if check.state === "idle"}
+          <p class="muted small">
+            SessionVault で、このプロジェクトのセッションのログが壊れていないか (読めない行・途中で切れた行・会話のつながり)、
+            保管庫の版と食い違っていないかを調べます。ログは書き換えません。
+          </p>
+        {:else if check.state === "error"}
+          <p class="err small">{check.message}</p>
+        {:else if check.state === "done"}
+          {#if check.findings.length === 0}
+            <p class="small"><span class="badge good">問題なし</span> <span class="muted">{formatTime(check.at)}</span></p>
+          {:else}
+            <p class="small">
+              {#each findingCounts as [sev, n]}<span class="badge {SEVERITY_BADGE[sev]}">{SEVERITY_LABEL[sev]} {n}</span> {/each}
+              <span class="muted">{formatTime(check.at)}</span>
+            </p>
+            <ul class="findings">
+              {#each check.findings as f, i (i)}
+                <li>
+                  <span class="badge {SEVERITY_BADGE[f.severity]}">{CHECK_LABEL[f.check] ?? f.check}</span>
+                  <span class="small">{sessionTitle(f.session)}</span>
+                  <div class="muted small mono">{f.path}{f.line ? `:${f.line}` : ""} {f.detail}</div>
+                </li>
+              {/each}
+            </ul>
+            {#if check.findings.some((f) => f.severity === "error")}
+              <p class="muted small">直すときは SessionVault の repair / restore を使います (Claude Code で開いていないときに)。</p>
+            {/if}
+          {/if}
+        {/if}
+      </section>
+
       <section>
         <h3>Claude のセッション <span class="muted small">{project.sessions.length} 件 (新しい順)</span></h3>
         <ul class="sessions">
@@ -691,6 +776,19 @@
 
   .err {
     color: var(--st-high);
+  }
+
+  .findings {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .findings .mono {
+    word-break: break-all;
   }
 
   .remotes {

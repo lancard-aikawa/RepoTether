@@ -84,6 +84,11 @@
     if (p && !draft.roots.some((r) => r.toLowerCase() === p.toLowerCase())) draft.roots.push(p);
   }
 
+  async function pickSessionvault() {
+    const p = await api.pickFile("sessionvault.exe の場所", draft.sessionvaultPath ?? undefined, ["exe"]);
+    if (p) draft.sessionvaultPath = p;
+  }
+
   async function pickCloneRoot() {
     const p = await api.pickFolder("クローン先の親フォルダ", draft.cloneRoot ?? undefined);
     if (p) draft.cloneRoot = p;
@@ -156,7 +161,10 @@
         {
           id: "other",
           label: "表示・その他",
-          dirty: !same([draft.cloneRoot, draft.claudeDir], [saved.cloneRoot, saved.claudeDir]),
+          dirty: !same(
+            [draft.cloneRoot, draft.claudeDir, draft.sessionvaultPath],
+            [saved.cloneRoot, saved.claudeDir, saved.sessionvaultPath],
+          ),
         },
         { id: "hidden", label: "非表示", count: draft.hidden.length, dirty: !same(draft.hidden, saved.hidden) },
         { id: "errors", label: "問題", count: app.snapshot?.errors.length ?? 0, dirty: false },
@@ -481,7 +489,15 @@
         </div>
         <label for="claude-dir">Claude のログの場所</label>
         <input id="claude-dir" type="text" class="mono" bind:value={draft.claudeDir} placeholder="空なら %USERPROFILE%\.claude\projects" />
+        <label for="sessionvault-path">SessionVault の場所</label>
+        <div class="inline">
+          <input id="sessionvault-path" type="text" class="mono grow" bind:value={draft.sessionvaultPath} placeholder="空なら PATH の sessionvault.exe" />
+          <button onclick={pickSessionvault}>参照</button>
+        </div>
       </div>
+      <p class="note">
+        SessionVault は Claude Code のログを残し・検査する道具です。詳細パネルの Claude タブの「ログの検査」で使います (読むだけ)。
+      </p>
     </section>
 
     <section class="panel card">

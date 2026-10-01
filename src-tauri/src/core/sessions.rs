@@ -32,7 +32,7 @@ struct CacheEntry {
     session: Session,
 }
 
-const CACHE_VERSION: u32 = 3;
+const CACHE_VERSION: u32 = 4;
 
 /// projects_dir 以下の全セッションを要約する。cache_path にキャッシュを読み書きする。
 pub fn load_all(projects_dir: &Path, cache_path: &Path) -> Result<Vec<Session>, String> {
@@ -142,7 +142,8 @@ struct Block {
 fn summarize(path: &Path) -> Option<Session> {
     let file = std::fs::File::open(path).ok()?;
     let id = path.file_stem()?.to_string_lossy().into_owned();
-    let mut s = Session { id, ..Default::default() };
+    let project_dir = path.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+    let mut s = Session { id, project_dir, ..Default::default() };
     let mut min_ts: Option<String> = None;
     let mut max_ts: Option<String> = None;
 

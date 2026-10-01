@@ -30,6 +30,8 @@ pub struct Config {
     pub tag_defs: Vec<String>,
     /// スター (お気に入り) を付けたプロジェクト。キーは hidden と同じ
     pub starred: Vec<String>,
+    /// SessionVault (sessionvault.exe) の場所。None なら PATH から探す
+    pub sessionvault_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -96,6 +98,7 @@ impl Default for Config {
             tags: BTreeMap::new(),
             tag_defs: vec![],
             starred: vec![],
+            sessionvault_path: None,
         }
     }
 }
