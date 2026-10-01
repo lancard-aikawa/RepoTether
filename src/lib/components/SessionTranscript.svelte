@@ -83,7 +83,7 @@
         {#each shown as e, i (i)}
           <article class="entry {e.role}">
             <div class="who">
-              <span class="role">{e.role === "user" ? "自分" : "Claude"}</span>
+              <span class="role">{e.role === "user" ? "自分" : e.role === "summary" ? "ここまでの要約 (Claude Code が作成)" : "Claude"}</span>
               {#if e.at}<span class="muted small num">{formatDateTime(toMs(e.at) ?? 0)}</span>{/if}
             </div>
             {#if e.role === "user"}
@@ -176,6 +176,12 @@
 
   .entry.assistant {
     background: var(--surface);
+  }
+
+  .entry.summary {
+    background: var(--surface);
+    border-style: dashed;
+    color: var(--muted);
   }
 
   .who {

@@ -32,7 +32,7 @@ struct CacheEntry {
     session: Session,
 }
 
-const CACHE_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 5;
 
 /// projects_dir 以下の全セッションを要約する。cache_path にキャッシュを読み書きする。
 pub fn load_all(projects_dir: &Path, cache_path: &Path) -> Result<Vec<Session>, String> {
@@ -108,6 +108,9 @@ struct Rec {
     git_branch: Option<String>,
     #[serde(rename = "isMeta")]
     is_meta: Option<bool>,
+    /// 文脈が長くなったときに Claude Code が書いた「ここまでの要約」。type は user だが人の入力ではない
+    #[serde(rename = "isCompactSummary")]
+    is_compact_summary: Option<bool>,
     #[serde(rename = "isSidechain")]
     is_sidechain: Option<bool>,
     #[serde(rename = "toolUseResult")]
@@ -178,7 +181,12 @@ fn summarize(path: &Path) -> Option<Session> {
                     s.title = Some(t);
                 }
             }
-            Some("user") if !sidechain && !r.is_meta.unwrap_or(false) && r.tool_use_result.is_none() => {
+            Some("user")
+                if !sidechain
+                    && !r.is_meta.unwrap_or(false)
+                    && !r.is_compact_summary.unwrap_or(false)
+                    && r.tool_use_result.is_none() =>
+            {
                 let Some(text) = r.message.and_then(|m| m.content).and_then(user_text) else {
                     continue;
                 };
@@ -284,6 +292,15 @@ pub fn transcript(projects_dir: &Path, session_id: &str) -> Result<Vec<Transcrip
             continue;
         }
         match r.kind.as_deref() {
+            Some("user") if r.is_compact_summary.unwrap_or(false) => {
+                let Some(text) = r.message.and_then(|m| m.content).and_then(user_text) else { continue };
+                out.push(TranscriptEntry {
+                    role: "summary".into(),
+                    at: r.timestamp,
+                    text: util::truncate_chars(text.trim(), TRANSCRIPT_MAX_CHARS),
+                    tools: vec![],
+                });
+            }
             Some("user") if !r.is_meta.unwrap_or(false) && r.tool_use_result.is_none() => {
                 let Some(text) = r.message.and_then(|m| m.content).and_then(user_text) else { continue };
                 if text.trim_start().starts_with("<task-notification>") {
@@ -443,12 +460,13 @@ mod transcript_tests {
             r#"{"type":"user","isMeta":true,"message":{"content":"メタ"}}"#,
             r#"{"type":"user","message":{"content":"<task-notification>done</task-notification>"}}"#,
             r#"{"type":"user","timestamp":"2026-09-01T00:01:00Z","message":{"content":"見て <pasted_content id=\"a\">貼った\n中身</pasted_content>"}}"#,
+            r#"{"type":"user","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"message":{"content":"This session is being continued..."}}"#,
         ];
         std::fs::write(proj.join(format!("{id}.jsonl")), lines.join("\n")).unwrap();
 
         let t = transcript(&dir, id).unwrap();
         let roles: Vec<&str> = t.iter().map(|e| e.role.as_str()).collect();
-        assert_eq!(roles, ["user", "assistant", "user"]);
+        assert_eq!(roles, ["user", "assistant", "user", "summary"]);
         assert_eq!(t[0].text, "直して\n2 行目");
         assert_eq!(t[1].text, "見ます\n\n直しました");
         assert_eq!(t[1].tools, ["Read", "Edit"]);

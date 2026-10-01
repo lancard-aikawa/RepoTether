@@ -93,7 +93,8 @@ export interface SessionFinding {
 
 /** セッションの会話の 1 件 (全文を見る) */
 export interface TranscriptEntry {
-  role: "user" | "assistant";
+  /** summary は文脈が長くなったときに Claude Code が書いた要約 (人の発言ではない) */
+  role: "user" | "assistant" | "summary";
   at: string | null;
   text: string;
   /** Claude が使ったツールの名前 */
