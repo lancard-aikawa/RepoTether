@@ -363,7 +363,7 @@ GitHub / Gogs / Gitea を足します。
 |---|---|
 | クローン先の親フォルダ | クローンのダイアログの既定 |
 | Claude のログの場所 | 空なら `%USERPROFILE%\.claude\projects` |
-| SessionVault の場所 | 「ログの検査」で使う `sessionvault.exe`。空なら PATH から探す。保管庫の場所は sessionvault.exe の設定 (exe の隣の `sessionvault.json`) に従う |
+| SessionVault の場所 | 「ログの検査」で使う SessionVault。**Claude History Viewer のフォルダ**か `sessionvault.exe` を指定する。空なら PATH の sessionvault.exe。Viewer のフォルダなら、Viewer に同梱の SessionVault を Python (3.10 以上) で動かし、Viewer の設定 (`sessionvault_src` / `sessionvault_config`) に合わせて Viewer と同じ保管庫を見る。exe なら、保管庫の場所は exe の隣の `sessionvault.json` に従う |
 | Claude Code のログの保存期間 | Claude Code の `cleanupPeriodDays` (下を参照)。「変更」を押したときだけ書き込む |
 | テーマ | OS に合わせる / ライト / ダーク (タイトルバーも合わせる) |
 | 一覧の密度 | 標準 / コンパクト (行を詰め、Claude の一行要約を省く) |
@@ -464,7 +464,9 @@ GitHub / Gogs / Gitea を足します。
 | 「再開」で「No conversation found」と出る | セッションを始めたフォルダが移動・削除された。Claude Code はフォルダごとにセッションを記録するので、元のフォルダでないと再開できない |
 | 「再開」「Claude」で端末は開くが claude が動かない | `claude` が PATH に無い。端末で `claude --version` が動くか確かめる |
 | 会話の全文が「見つかりません」 | ログが消されたか、別の PC のセッション (履歴は取り込み時の要約から出している) |
-| 「ログの検査」で「sessionvault.exe が見つかりません」 | 「設定 → 表示・その他」の「SessionVault の場所」に sessionvault.exe を指定する |
+| 「ログの検査」で「sessionvault.exe が見つかりません」 | 「設定 → 表示・その他」の「SessionVault の場所」に Claude History Viewer のフォルダか sessionvault.exe を指定する |
+| 「Viewer の SessionVault がありません」 | Viewer をサブモジュールなしで取ってきた。Viewer のフォルダで `git submodule update --init` を実行する (Release の zip なら同梱されている) |
+| 「Python が見つかりません」 | Viewer のフォルダを指定したときは Python 3.10 以上が要る。入れるか、sessionvault.exe を指定する |
 | 「ログの検査」で「保管庫の版と食い違う」が出ない・「消えた」が出ない | sessionvault.exe が保管庫を見つけていない。exe の隣で `sessionvault.exe config set vault <保管庫>` を実行する |
 | 1 か月より前の Claude の履歴が無い | Claude Code が既定で 30 日より古いログを消すため。「表示・その他」の「Claude Code のログの保存期間」を延ばす (消えた分は戻らない) |
 

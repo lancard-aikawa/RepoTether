@@ -30,7 +30,8 @@ pub struct Config {
     pub tag_defs: Vec<String>,
     /// スター (お気に入り) を付けたプロジェクト。キーは hidden と同じ
     pub starred: Vec<String>,
-    /// SessionVault (sessionvault.exe) の場所。None なら PATH から探す
+    /// SessionVault の場所。sessionvault.exe か、Claude History Viewer のフォルダ (同梱の SessionVault を Python で呼ぶ)。
+    /// None なら PATH の sessionvault.exe
     pub sessionvault_path: Option<String>,
 }
 

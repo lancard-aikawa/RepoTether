@@ -139,7 +139,7 @@ export interface Config {
   tagDefs: string[];
   /** スター (お気に入り) を付けたプロジェクトの設定キー */
   starred: string[];
-  /** sessionvault.exe の場所。null なら PATH から探す */
+  /** sessionvault.exe か Claude History Viewer のフォルダ。null なら PATH の sessionvault.exe */
   sessionvaultPath: string | null;
 }
 

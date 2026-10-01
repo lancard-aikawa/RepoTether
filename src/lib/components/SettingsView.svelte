@@ -89,6 +89,11 @@
     if (p) draft.sessionvaultPath = p;
   }
 
+  async function pickViewerFolder() {
+    const p = await api.pickFolder("Claude History Viewer のフォルダ", draft.sessionvaultPath ?? undefined);
+    if (p) draft.sessionvaultPath = p;
+  }
+
   async function pickCloneRoot() {
     const p = await api.pickFolder("クローン先の親フォルダ", draft.cloneRoot ?? undefined);
     if (p) draft.cloneRoot = p;
@@ -492,11 +497,14 @@
         <label for="sessionvault-path">SessionVault の場所</label>
         <div class="inline">
           <input id="sessionvault-path" type="text" class="mono grow" bind:value={draft.sessionvaultPath} placeholder="空なら PATH の sessionvault.exe" />
-          <button onclick={pickSessionvault}>参照</button>
+          <button onclick={pickViewerFolder} title="Claude History Viewer のフォルダ (同梱の SessionVault を Python で動かす)">フォルダ</button>
+          <button onclick={pickSessionvault} title="sessionvault.exe">exe</button>
         </div>
       </div>
       <p class="note">
         SessionVault は Claude Code のログを残し・検査する道具です。詳細パネルの Claude タブの「ログの検査」で使います (読むだけ)。
+        Claude History Viewer を使っているなら、そのフォルダを指定すると、Viewer に同梱の SessionVault で、Viewer と同じ保管庫を見て検査します
+        (Python 3.10 以上が要ります)。
       </p>
     </section>
 

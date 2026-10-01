@@ -192,8 +192,8 @@ async fn sessionvault_verify(
         (c.sessionvault_path.clone(), c.claude_projects_dir().ok_or("Claude のログの場所が分かりません")?)
     };
     tauri::async_runtime::spawn_blocking(move || {
-        let exe = core::sessionvault::resolve_exe(exe.as_deref())?;
-        core::sessionvault::verify(&exe, &dir, &project_dirs)
+        let runner = core::sessionvault::resolve(exe.as_deref())?;
+        core::sessionvault::verify(&runner, &dir, &project_dirs)
     })
     .await
     .map_err(|e| e.to_string())?
