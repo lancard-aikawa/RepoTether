@@ -253,9 +253,9 @@ export async function loadVulns() {
   }
 }
 
-/** そのリポジトリだけ照合し直す。終わったら結果を差し替える */
-export async function scanVulns(repoId: string) {
-  app.vulns = await api.lockwatchScan(repoId);
+/** そのリポジトリだけ照合し直す。終わったら結果を差し替える。fresh ならキャッシュを使わない */
+export async function scanVulns(repoId: string, fresh = false) {
+  app.vulns = await api.lockwatchScan(repoId, fresh);
 }
 
 export async function updateConfig(next: Config, opts: { refresh?: boolean; remote?: boolean } = {}) {

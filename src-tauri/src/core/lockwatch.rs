@@ -347,9 +347,39 @@ pub fn report(targets: &[(String, Target)], latest: Option<&Latest>) -> VulnRepo
     }
 }
 
-/// `lockwatch scan --id <id>`。latest.json のそのリポジトリだけが差し替わる
-pub fn scan_one(r: &Runner, target_id: &str) -> Result<(), String> {
-    let o = run(r, &["scan", "--id", target_id], SCAN_TIMEOUT)?;
+/// 事前チェック (`lockwatch scan --id <id> --check`) の答え
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct Check {
+    pub id: String,
+    pub mode: String,
+    /// 今照合したら前回の結果がそのまま返る
+    pub cached: bool,
+    /// cached のとき、その結果を作った時刻
+    pub scanned_at: Option<String>,
+    pub lockfiles: Vec<String>,
+    /// cached / no-cache / db-update / no-lockfile / error
+    pub reason: String,
+    pub error: Option<String>,
+}
+
+/// 照合はせず、今照合したらキャッシュの結果が返るかを聞く (読むだけ。通信もしない)
+pub fn check_one(r: &Runner, target_id: &str) -> Result<Check, String> {
+    let o = run(r, &["scan", "--id", target_id, "--check"], CONFIG_TIMEOUT)?;
+    if o.code != Some(0) {
+        return Err(error_line(&o, "LockWatch の事前チェックが失敗しました"));
+    }
+    serde_json::from_str(&o.stdout).map_err(|e| format!("LockWatch の事前チェックの答えを読めません: {e}"))
+}
+
+/// `lockwatch scan --id <id>`。latest.json のそのリポジトリだけが差し替わる。
+/// fresh ならキャッシュを使わずに照合し直す (`--no-cache`)
+pub fn scan_one(r: &Runner, target_id: &str, fresh: bool) -> Result<(), String> {
+    let mut args = vec!["scan", "--id", target_id];
+    if fresh {
+        args.push("--no-cache");
+    }
+    let o = run(r, &args, SCAN_TIMEOUT)?;
     match o.code {
         Some(0) => Ok(()),
         // 照合に失敗したリポジトリは結果に error として書かれる。osv-scanner が無いなど、結果を書けなかったときだけ Err
@@ -497,6 +527,19 @@ mod tests {
         let json = serde_json::to_value(&rep).unwrap();
         assert!(json["byRepo"].as_object().unwrap().values().any(|v| v["result"]["scannedAt"].is_string()));
         let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn parses_check_answer() {
+        let c: Check = serde_json::from_str(
+            r#"{"id": "github.com/me/pub", "mode": "online", "cached": true, "scanned_at": "2026-10-02T09:37:52+09:00",
+                "lockfiles": ["uv.lock"], "reason": "cached"}"#,
+        )
+        .unwrap();
+        assert!(c.cached);
+        assert_eq!(c.error, None);
+        let json = serde_json::to_value(&c).unwrap();
+        assert_eq!(json["scannedAt"], "2026-10-02T09:37:52+09:00");
     }
 
     #[test]

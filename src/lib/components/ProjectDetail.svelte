@@ -107,11 +107,15 @@
   const vulnHiddenCount = $derived(vulnAll.length - vulnFindings.length);
   const vulnChoices = $derived(vulnsLib.hideChoices(vulnAll));
   const isNewVuln = (pkg: string, id: string) => !!vulns?.new.some(([p, i]) => p === pkg && i === id);
-  let scanning = $state(false);
+  /** checking = 事前チェック中、scanning = 照合中 */
+  let scanning = $state<"" | "checking" | "scanning">("");
   let scanError = $state("");
+  /** 事前チェックで「前回から変わっていない」と分かったときの、その結果の時刻 (照合し直すかを選ばせる) */
+  let unchangedSince = $state<string | null>(null);
   $effect(() => {
     void project.key;
     scanError = "";
+    unchangedSince = null;
   });
 
   function toggleHide(k: string) {
@@ -119,17 +123,45 @@
     savePrefs();
   }
 
+  /**
+   * 「今すぐ調べる」: 先に事前チェックをし、lock ファイルも脆弱性 DB も前回から変わっていなければ
+   * 照合せずに知らせて、照合し直すかを選ばせる (照合し直しても時刻が変わらず、何もしていないように見えるため)
+   */
   async function runScan() {
     if (!project.local) return;
     const key = project.key;
-    scanning = true;
+    scanning = "checking";
     scanError = "";
+    unchangedSince = null;
     try {
+      const c = await api.lockwatchCheck(project.local.id);
+      if (project.key !== key) return;
+      if (c.cached) {
+        unchangedSince = c.scannedAt;
+        return;
+      }
+      scanning = "scanning";
       await scanVulns(project.local.id);
     } catch (e) {
       if (project.key === key) scanError = errorText(e);
     } finally {
-      scanning = false;
+      scanning = "";
+    }
+  }
+
+  /** 前回の結果を使わずに照合し直す */
+  async function rescan() {
+    if (!project.local) return;
+    const key = project.key;
+    scanning = "scanning";
+    scanError = "";
+    unchangedSince = null;
+    try {
+      await scanVulns(project.local.id, true);
+    } catch (e) {
+      if (project.key === key) scanError = errorText(e);
+    } finally {
+      scanning = "";
     }
   }
 
@@ -571,10 +603,20 @@
       <section>
         <h3>
           脆弱性
-          <button class="small-btn" onclick={runScan} disabled={scanning || !vulns} title="LockWatch で、このリポジトリだけ照合し直す">
-            {scanning ? "調べています…" : "今すぐ調べる"}
+          <button class="small-btn" onclick={runScan} disabled={!!scanning || !vulns} title="LockWatch で、このリポジトリだけ照合し直す">
+            {scanning === "checking" ? "確かめています…" : scanning === "scanning" ? "調べています…" : "今すぐ調べる"}
           </button>
         </h3>
+        {#if unchangedSince}
+          <div class="notice small">
+            <p>
+              前回の照合 ({when(unchangedSince)}) から、lock ファイルも脆弱性 DB も変わっていません。下の結果がそのまま最新です。
+              そのあとに公表された脆弱性も拾うなら、照合し直してください。
+            </p>
+            <button class="small-btn" onclick={() => (unchangedSince = null)}>この結果のまま</button>
+            <button class="small-btn" onclick={rescan}>もう一度照合する</button>
+          </div>
+        {/if}
         {#if app.vulns?.error}
           <p class="err small">{app.vulns.error}</p>
         {:else if !vulns}
@@ -913,6 +955,19 @@
 
   .findings .mono {
     word-break: break-all;
+  }
+
+  /* 「今すぐ調べる」で前回から変わっていなかったときの知らせ */
+  .notice {
+    border: 1px solid var(--line-strong);
+    background: var(--surface-2);
+    border-radius: 6px;
+    padding: 6px 10px 8px;
+    margin-bottom: 8px;
+  }
+
+  .notice p {
+    margin: 0 0 6px;
   }
 
   .hide-row {

@@ -2,7 +2,7 @@
 // ブラウザで `pnpm dev` だけを開いたとき (Tauri の外) は、static/dev-snapshot.json を読む表示確認用のモードになる。
 // dev-snapshot.json は `cargo run --example dump -- ../static/dev-snapshot.json` で作る (git には入れない)。
 
-import type { Commit, Config, SessionFinding, Snapshot, TranscriptEntry, VulnReport } from "./types";
+import type { Commit, Config, SessionFinding, Snapshot, TranscriptEntry, VulnCheck, VulnReport } from "./types";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -60,6 +60,7 @@ type MockHooks = {
   __mockTranscript?: TranscriptEntry[];
   __mockFindings?: SessionFinding[];
   __mockVulns?: VulnReport;
+  __mockVulnCheck?: VulnCheck;
   /** パス → アイコンの URL (data: など) */
   __mockIcons?: Record<string, string>;
 };
@@ -200,10 +201,20 @@ export async function lockwatchResults(): Promise<VulnReport> {
   return call("lockwatch_results");
 }
 
-/** そのリポジトリだけ LockWatch で照合し直す。repoId は LocalRepo.id */
-export async function lockwatchScan(repoId: string): Promise<VulnReport> {
+/** 「今すぐ調べる」の事前チェック: 今照合したら前回の結果がそのまま返るか (照合はしない) */
+export async function lockwatchCheck(repoId: string): Promise<VulnCheck> {
+  if (!inTauri) {
+    const given = hooks().__mockVulnCheck;
+    if (given) return given;
+    throw new Error("ブラウザ表示では調べられません");
+  }
+  return call("lockwatch_check", { repoId });
+}
+
+/** そのリポジトリだけ LockWatch で照合し直す。repoId は LocalRepo.id。fresh ならキャッシュを使わない */
+export async function lockwatchScan(repoId: string, fresh = false): Promise<VulnReport> {
   if (!inTauri) throw new Error("ブラウザ表示では調べられません");
-  return call("lockwatch_scan", { repoId });
+  return call("lockwatch_scan", { repoId, fresh });
 }
 
 /** ファイル選択ダイアログ。キャンセルなら null */

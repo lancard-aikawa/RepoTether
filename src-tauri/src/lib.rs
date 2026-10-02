@@ -86,19 +86,37 @@ async fn lockwatch_results(app: AppHandle) -> Result<core::lockwatch::VulnReport
         .map_err(|e| e.to_string())
 }
 
-/// そのリポジトリだけ LockWatch で照合し直す (`lockwatch scan --id`)。repo_id は LocalRepo.id
+/// LocalRepo.id から、LockWatch の呼び方と LockWatch での id を決める。
+/// その前に targets.json を今の一覧にそろえる (新しく見つかったリポジトリも --id で選べるように)
+fn lockwatch_target(state: &AppState, repo_id: &str) -> Result<(core::lockwatch::Runner, String), String> {
+    let snap = core::load_snapshot(&state.snapshot_path()).ok_or("まだ取り込んでいません")?;
+    let (runner, _, targets) = write_lockwatch_targets(state, &snap)?.ok_or("設定で LockWatch の場所を決めてください")?;
+    let (_, t) = targets
+        .iter()
+        .find(|(id, _)| id == repo_id)
+        .ok_or("このリポジトリは LockWatch の対象にありません (非表示にしたものは対象外です)")?;
+    Ok((runner, t.id.clone()))
+}
+
+/// 「今すぐ調べる」の事前チェック: 今照合したら前回の結果がそのまま返るか (照合はしない)
 #[tauri::command]
-async fn lockwatch_scan(app: AppHandle, repo_id: String) -> Result<core::lockwatch::VulnReport, String> {
+async fn lockwatch_check(app: AppHandle, repo_id: String) -> Result<core::lockwatch::Check, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (runner, id) = lockwatch_target(&app.state::<AppState>(), &repo_id)?;
+        core::lockwatch::check_one(&runner, &id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// そのリポジトリだけ LockWatch で照合し直す (`lockwatch scan --id`)。repo_id は LocalRepo.id。
+/// fresh ならキャッシュを使わない
+#[tauri::command]
+async fn lockwatch_scan(app: AppHandle, repo_id: String, fresh: Option<bool>) -> Result<core::lockwatch::VulnReport, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        let snap = core::load_snapshot(&state.snapshot_path()).ok_or("まだ取り込んでいません")?;
-        // 照合の前に targets.json を今の一覧にそろえる (新しく見つかったリポジトリも --id で選べるように)
-        let (runner, _, targets) = write_lockwatch_targets(&state, &snap)?.ok_or("設定で LockWatch の場所を決めてください")?;
-        let (_, t) = targets
-            .iter()
-            .find(|(id, _)| *id == repo_id)
-            .ok_or("このリポジトリは LockWatch の対象にありません (非表示にしたものは対象外です)")?;
-        core::lockwatch::scan_one(&runner, &t.id)?;
+        let (runner, id) = lockwatch_target(&state, &repo_id)?;
+        core::lockwatch::scan_one(&runner, &id, fresh.unwrap_or(false))?;
         Ok(lockwatch_report(&state))
     })
     .await
@@ -526,6 +544,7 @@ pub fn run() {
             get_claude_retention,
             set_claude_retention,
             lockwatch_results,
+            lockwatch_check,
             lockwatch_scan
         ])
         .run(tauri::generate_context!())

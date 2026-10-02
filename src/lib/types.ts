@@ -186,6 +186,19 @@ export interface RepoVulns {
   new: [string, string][];
 }
 
+/** 「今すぐ調べる」の事前チェック (LockWatch の scan --check) の答え */
+export interface VulnCheck {
+  id: string;
+  mode: "online" | "offline";
+  /** 今照合したら前回の結果がそのまま返る */
+  cached: boolean;
+  /** cached のとき、その結果を作った時刻 */
+  scannedAt: string | null;
+  lockfiles: string[];
+  reason: "cached" | "no-cache" | "db-update" | "no-lockfile" | "error";
+  error: string | null;
+}
+
 export interface VulnReport {
   /** 設定で LockWatch の場所が決まっているか */
   configured: boolean;
