@@ -45,6 +45,10 @@ jobs:
 
       - name: 版を決める (タグと 3 か所の一致を検査)
         id: version
+        # タグ名はスクリプトに埋め込まず、環境変数で渡して形を確かめてから使う (Actions の式の展開によるスクリプトの注入を防ぐ)
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
         run: |
           $ErrorActionPreference = 'Stop'
           $pkg = (Get-Content package.json -Raw | ConvertFrom-Json).version
@@ -56,8 +60,9 @@ jobs:
           if ($pkg -ne $conf -or $pkg -ne $cargo) {
             throw "package.json ($pkg) / tauri.conf.json ($conf) / Cargo.toml ($cargo) の版がそろっていません"
           }
-          if ('${{ github.ref_type }}' -eq 'tag') {
-            $tag = '${{ github.ref_name }}'
+          if ($env:REF_TYPE -eq 'tag') {
+            $tag = $env:TAG
+            if ($tag -notmatch '^v[0-9A-Za-z.\-]+$') { throw "タグの形が違います: $tag" }
             $want = $tag -replace '^v', ''
             if ($want -ne $pkg) {
               throw "タグ $tag は版 $want を意味しますが、コードは $pkg です。3 か所を上げてからタグを打ち直してください"
@@ -140,8 +145,10 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
         run: |
-          $tag = '${{ github.ref_name }}'
+          $tag = $env:TAG
+          if ($tag -notmatch '^v[0-9A-Za-z.\-]+$') { throw "タグの形が違います: $tag" }
           $files = @('dist/${{ steps.version.outputs.zip }}', 'dist/${{ steps.dist.outputs.setup }}')
           $title = 'RepoTether ${{ steps.version.outputs.version }}'
           gh release view $tag *> $null
