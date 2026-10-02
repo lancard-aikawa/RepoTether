@@ -98,23 +98,52 @@ fn lockwatch_target(state: &AppState, repo_id: &str) -> Result<(core::lockwatch:
     Ok((runner, t.id.clone()))
 }
 
-/// LockWatch が使える状態か。path を渡せばその場所 (設定の画面で保存前に確かめる)、無ければ設定の場所
+/// 画面から渡された場所か、無ければ設定の LockWatch の場所
+fn lockwatch_dir(state: &AppState, path: Option<String>) -> Result<String, String> {
+    match path.filter(|p| !p.trim().is_empty()) {
+        Some(p) => Ok(p),
+        None => state
+            .config
+            .lock()
+            .unwrap()
+            .lockwatch_path
+            .clone()
+            .filter(|p| !p.trim().is_empty())
+            .ok_or_else(|| "LockWatch の場所が決まっていません".to_string()),
+    }
+}
+
+/// LockWatch が使える状態か。path を渡せばその場所 (設定の画面で保存前に確かめる)、無ければ設定の場所。
+/// 設定の場所なら、覚えているデータの場所もこの答えで更新する (LockWatch の画面で場所を変えたときのため)
 #[tauri::command]
 async fn lockwatch_status(app: AppHandle, path: Option<String>) -> Result<core::lockwatch::Status, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let dir = match path.filter(|p| !p.trim().is_empty()) {
-            Some(p) => p,
-            None => app
-                .state::<AppState>()
-                .config
-                .lock()
-                .unwrap()
-                .lockwatch_path
-                .clone()
-                .filter(|p| !p.trim().is_empty())
-                .ok_or("LockWatch の場所が決まっていません")?,
-        };
-        core::lockwatch::status(&core::lockwatch::resolve(&dir)?)
+        let state = app.state::<AppState>();
+        let dir = lockwatch_dir(&state, path)?;
+        let status = core::lockwatch::status(&core::lockwatch::resolve(&dir)?)?;
+        let configured = state.config.lock().unwrap().lockwatch_path.clone();
+        if configured.as_deref().map(str::trim) == Some(dir.trim()) {
+            let loc = core::lockwatch::Locations {
+                data_dir: PathBuf::from(&status.data_dir),
+                targets: PathBuf::from(&status.targets),
+            };
+            *state.lockwatch_locations.lock().unwrap() = Some((dir, loc));
+        }
+        Ok(status)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// LockWatch の画面 (lockwatch gui) を開く。設定を変えたら、戻ってきてから「確かめる」で読み直す
+#[tauri::command]
+async fn lockwatch_open_gui(app: AppHandle, path: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let dir = lockwatch_dir(&state, path)?;
+        // LockWatch の画面で場所を変えるかもしれないので、覚えている場所は捨てて次に聞き直す
+        *state.lockwatch_locations.lock().unwrap() = None;
+        core::lockwatch::open_gui(&core::lockwatch::resolve(&dir)?)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -567,6 +596,7 @@ pub fn run() {
             set_claude_retention,
             lockwatch_results,
             lockwatch_status,
+            lockwatch_open_gui,
             lockwatch_check,
             lockwatch_scan
         ])

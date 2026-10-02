@@ -143,6 +143,32 @@ fn parse_locations(stdout: &str) -> Result<Locations, String> {
     Ok(Locations { data_dir: path("_effective_data_dir")?, targets: path("_effective_targets")? })
 }
 
+/// 窓を出す側の Python (python.exe → pythonw.exe、py.exe → pyw.exe)。無ければそのまま
+fn windowed(python: &Path) -> PathBuf {
+    let name = python.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let alt = match name.as_str() {
+        "python.exe" => "pythonw.exe",
+        "py.exe" => "pyw.exe",
+        _ => return python.to_path_buf(),
+    };
+    let w = python.with_file_name(alt);
+    if w.is_file() { w } else { python.to_path_buf() }
+}
+
+/// LockWatch の画面 (`lockwatch gui`) を開く。終わるのを待たない
+pub fn open_gui(r: &Runner) -> Result<(), String> {
+    let mut cmd = Command::new(windowed(&r.python));
+    cmd.args(&r.python_args)
+        .args(["-m", "lockwatch", "gui"])
+        .env("PYTHONPATH", &r.src)
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .current_dir(r.src.parent().unwrap_or(&r.src))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    cmd.spawn().map(|_| ()).map_err(|e| format!("LockWatch の画面を開けません: {e}"))
+}
+
 // ---- 使える状態か (`lockwatch status --json`) ----
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -580,6 +606,19 @@ mod tests {
         // 画面へは camelCase
         let json = serde_json::to_value(&rep).unwrap();
         assert!(json["byRepo"].as_object().unwrap().values().any(|v| v["result"]["scannedAt"].is_string()));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn gui_uses_windowed_python_when_present() {
+        let d = tmp("pyw");
+        std::fs::write(d.join("python.exe"), "").unwrap();
+        assert_eq!(windowed(&d.join("python.exe")), d.join("python.exe"), "pythonw.exe が無ければそのまま");
+        std::fs::write(d.join("pythonw.exe"), "").unwrap();
+        assert_eq!(windowed(&d.join("python.exe")), d.join("pythonw.exe"));
+        std::fs::write(d.join("pyw.exe"), "").unwrap();
+        assert_eq!(windowed(&d.join("py.exe")), d.join("pyw.exe"));
+        assert_eq!(windowed(Path::new("/usr/bin/python3")), PathBuf::from("/usr/bin/python3"));
         let _ = std::fs::remove_dir_all(d);
     }
 

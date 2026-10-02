@@ -228,6 +228,12 @@ export async function lockwatchStatus(path?: string | null): Promise<LockwatchSt
   return call("lockwatch_status", { path: path ?? null });
 }
 
+/** LockWatch の画面 (状態・結果・設定) を開く。path を渡せばその場所、省けば設定の場所 */
+export async function lockwatchOpenGui(path?: string | null): Promise<void> {
+  if (!inTauri) throw new Error("ブラウザ表示では開けません");
+  return call("lockwatch_open_gui", { path: path ?? null });
+}
+
 /** 「今すぐ調べる」の事前チェック: 今照合したら前回の結果がそのまま返るか (照合はしない) */
 export async function lockwatchCheck(repoId: string): Promise<VulnCheck> {
   if (!inTauri) {

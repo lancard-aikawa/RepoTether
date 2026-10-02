@@ -3,6 +3,11 @@
 <!-- 見出しは `## <版番号>` の形にすること (release.yml がこの節を Release の本文に使う)。
      まだ出していない変更は「## 未公開」に書き、リリースのときに版番号へ書き換える -->
 
+## 未公開
+
+- 設定の「脆弱性」タブに「LockWatch を開く」。LockWatch の画面 (状態・結果・設定) を開き、LockWatch の設定はそこで変えられる。
+  戻ってきて「確かめる」を押すと、変えたデータの場所も読み直す。LockWatch の `lockwatch gui` (main の最新) が要る
+
 ## 0.6.0
 
 - [LockWatch](https://github.com/lancard-aikawa/LockWatch) (lock ファイルを osv-scanner にかけて脆弱性を調べる CLI。別に入れる) とつなぐ。

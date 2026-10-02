@@ -133,6 +133,18 @@
     if (untrack(() => lw.state === "idle" && !!draft.lockwatchPath?.trim())) checkLockwatch();
   });
 
+  let guiOpened = $state(false);
+
+  /** LockWatch の画面を開く (確かめて使えると分かった場所で) */
+  async function openLockwatchGui() {
+    try {
+      await api.lockwatchOpenGui(draft.lockwatchPath);
+      guiOpened = true;
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
   async function copyText(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -550,8 +562,20 @@
           <button onclick={checkLockwatch} disabled={!draft.lockwatchPath?.trim() || lw.state === "checking"}>
             {lw.state === "checking" ? "確かめています…" : "確かめる"}
           </button>
+          <button
+            onclick={openLockwatchGui}
+            disabled={lw.state !== "ok"}
+            title="LockWatch の画面 (状態・結果・設定) を開く。LockWatch の設定はそこで変える"
+          >
+            LockWatch を開く
+          </button>
         </div>
       </div>
+      {#if guiOpened}
+        <p class="note">
+          LockWatch の画面を開きました。そこで設定 (データの場所など) を変えたら、戻ってきて「確かめる」を押してください。
+        </p>
+      {/if}
 
       {#if !draft.lockwatchPath?.trim()}
         <h3>使い始めるには</h3>
