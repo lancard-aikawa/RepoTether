@@ -135,6 +135,13 @@
 
   let guiOpened = $state(false);
 
+  /** LockWatch の画面 (lockwatch gui) は 0.2.0 から。古い LockWatch では押せないようにする */
+  const LOCKWATCH_GUI_SINCE = [0, 2];
+  const hasGui = (version: string) => {
+    const [major, minor] = version.split(".").map((x) => Number.parseInt(x, 10) || 0);
+    return major > LOCKWATCH_GUI_SINCE[0] || (major === LOCKWATCH_GUI_SINCE[0] && minor >= LOCKWATCH_GUI_SINCE[1]);
+  };
+
   /** LockWatch の画面を開く (確かめて使えると分かった場所で) */
   async function openLockwatchGui() {
     try {
@@ -564,13 +571,21 @@
           </button>
           <button
             onclick={openLockwatchGui}
-            disabled={lw.state !== "ok"}
-            title="LockWatch の画面 (状態・結果・設定) を開く。LockWatch の設定はそこで変える"
+            disabled={lw.state !== "ok" || !hasGui(lw.status.lockwatch)}
+            title={lw.state === "ok" && !hasGui(lw.status.lockwatch)
+              ? "LockWatch の画面は 0.2.0 からです。LockWatch を更新してください (git pull と uv sync)"
+              : "LockWatch の画面 (状態・結果・設定) を開く。LockWatch の設定はそこで変える"}
           >
             LockWatch を開く
           </button>
         </div>
       </div>
+      {#if lw.state === "ok" && !hasGui(lw.status.lockwatch)}
+        <p class="note">
+          LockWatch {lw.status.lockwatch} には画面がありません (0.2.0 から)。LockWatch のフォルダで <code>git pull</code> と
+          <code>uv sync</code> をすると「LockWatch を開く」が使えます。
+        </p>
+      {/if}
       {#if guiOpened}
         <p class="note">
           LockWatch の画面を開きました。そこで設定 (データの場所など) を変えたら、戻ってきて「確かめる」を押してください。
