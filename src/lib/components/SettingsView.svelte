@@ -3,7 +3,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import type { Project } from "$lib/derive";
   import { emailCandidates } from "$lib/derive";
-  import type { Account, AccountKind, Config } from "$lib/types";
+  import type { Account, AccountKind, Config, LockwatchStatus } from "$lib/types";
   import * as api from "$lib/api";
   import {
     app,
@@ -96,7 +96,50 @@
 
   async function pickLockwatch() {
     const p = await api.pickFolder("LockWatch のリポジトリのフォルダ", draft.lockwatchPath ?? undefined);
-    if (p) draft.lockwatchPath = p;
+    if (p) {
+      draft.lockwatchPath = p;
+      checkLockwatch();
+    }
+  }
+
+  // ---- LockWatch (脆弱性タブ) ----
+  // 入力中の場所で確かめる (保存前でも)。保存済みの場所と同じなら、詳細パネルの案内にも使う
+  let lw = $state<
+    | { state: "idle" }
+    | { state: "checking" }
+    | { state: "ok"; status: LockwatchStatus; path: string }
+    | { state: "error"; text: string }
+  >({ state: "idle" });
+
+  async function checkLockwatch() {
+    const path = draft.lockwatchPath?.trim();
+    if (!path) {
+      lw = { state: "idle" };
+      return;
+    }
+    lw = { state: "checking" };
+    try {
+      const status = await api.lockwatchStatus(path);
+      lw = { state: "ok", status, path };
+      if (path === app.config?.lockwatchPath?.trim()) app.lockwatchStatus = status;
+    } catch (e) {
+      lw = { state: "error", text: errorText(e) };
+    }
+  }
+
+  // 脆弱性のタブを開いたら、場所が決まっていれば自動で確かめる
+  $effect(() => {
+    if (tab !== "vulns") return;
+    if (untrack(() => lw.state === "idle" && !!draft.lockwatchPath?.trim())) checkLockwatch();
+  });
+
+  async function copyText(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("コピーしました");
+    } catch (e) {
+      toast(errorText(e));
+    }
   }
 
   async function pickCloneRoot() {
@@ -152,7 +195,7 @@
   }
 
   // ---- タブ ----
-  type SettingsTab = "roots" | "authors" | "accounts" | "other" | "hidden" | "errors";
+  type SettingsTab = "roots" | "authors" | "accounts" | "vulns" | "other" | "hidden" | "errors";
   const saved = $derived(app.config!);
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const tabs = $derived(
@@ -168,12 +211,13 @@
         },
         { id: "authors", label: "自分のコミット", dirty: !same(draft.authorEmails, saved.authorEmails) },
         { id: "accounts", label: "アカウント", dirty: !same(draft.accounts, saved.accounts) },
+        { id: "vulns", label: "脆弱性", dirty: !same(draft.lockwatchPath ?? "", saved.lockwatchPath ?? "") },
         {
           id: "other",
           label: "表示・その他",
           dirty: !same(
-            [draft.cloneRoot, draft.claudeDir, draft.sessionvaultPath, draft.lockwatchPath],
-            [saved.cloneRoot, saved.claudeDir, saved.sessionvaultPath, saved.lockwatchPath],
+            [draft.cloneRoot, draft.claudeDir, draft.sessionvaultPath],
+            [saved.cloneRoot, saved.claudeDir, saved.sessionvaultPath],
           ),
         },
         { id: "hidden", label: "非表示", count: draft.hidden.length, dirty: !same(draft.hidden, saved.hidden) },
@@ -488,6 +532,119 @@
     </section>
     {/if}
 
+    {#if tab === "vulns"}
+    <section class="panel card">
+      <h2>脆弱性 (LockWatch)</h2>
+      <p class="note">
+        LockWatch は、リポジトリの lock ファイル (package-lock.json・pnpm-lock.yaml・uv.lock・Cargo.lock など) を osv-scanner にかけて、
+        使っているパッケージの脆弱性を調べる別の道具です (入れなくても RepoTether は使えます)。場所を指定すると、更新のたびに手元のリポジトリの一覧
+        (公開・非公開の別つき) を LockWatch に渡し、結果を詳細パネルの「脆弱性」タブと一覧の印に出します。
+        <strong>非公開のリポジトリと公開か分からないものは、LockWatch がパッケージ名を外に出さず、手元の脆弱性 DB で照合します。</strong>
+        公開とみなすのは github.com で公開のものだけで、Gogs・Gitea などの自前のサーバーのものは非公開として渡します。
+      </p>
+      <div class="grid">
+        <label for="lockwatch-path">LockWatch の場所</label>
+        <div class="inline">
+          <input id="lockwatch-path" type="text" class="mono grow" bind:value={draft.lockwatchPath} placeholder="LockWatch のフォルダ。空なら使わない" />
+          <button onclick={pickLockwatch}>参照</button>
+          <button onclick={checkLockwatch} disabled={!draft.lockwatchPath?.trim() || lw.state === "checking"}>
+            {lw.state === "checking" ? "確かめています…" : "確かめる"}
+          </button>
+        </div>
+      </div>
+
+      {#if !draft.lockwatchPath?.trim()}
+        <h3>使い始めるには</h3>
+        <ol class="note steps">
+          <li>
+            osv-scanner を入れる:
+            <code>{api.OSV_SCANNER_INSTALL}</code>
+            <button class="small" onclick={() => copyText(api.OSV_SCANNER_INSTALL)}>コピー</button>
+          </li>
+          <li>
+            LockWatch を入れる (Python 3.10 以上と uv が要ります。手順は
+            <button class="link" onclick={() => api.openUrl(api.LOCKWATCH_URL + "#入れ方")}>LockWatch の README</button>)
+          </li>
+          <li>上の「LockWatch の場所」に LockWatch のフォルダを指定し、「確かめる」で使えるかを見てから保存する</li>
+          <li>LockWatch の定期実行を登録する (<code>{api.LOCKWATCH_REGISTER}</code>)</li>
+        </ol>
+      {:else if lw.state === "error"}
+        <p class="gh-error">{lw.text}</p>
+      {:else if lw.state === "ok"}
+        {@const s = lw.status}
+        <table class="lw-status">
+          <tbody>
+            <tr><th>LockWatch</th><td><span class="badge good">{s.lockwatch}</span></td></tr>
+            <tr>
+              <th>osv-scanner</th>
+              <td>
+                {#if s.osvScanner.version}
+                  <span class="badge good">{s.osvScanner.version}</span> <span class="mono muted">{s.osvScanner.path}</span>
+                {:else}
+                  <span class="badge high">使えません</span> {s.osvScanner.error}
+                  <div class="cmd">
+                    <code>{api.OSV_SCANNER_INSTALL}</code>
+                    <button class="small" onclick={() => copyText(api.OSV_SCANNER_INSTALL)}>コピー</button>
+                  </div>
+                {/if}
+              </td>
+            </tr>
+            <tr>
+              <th>受け渡し</th>
+              <td>
+                <span class="mono">{s.targets}</span>
+                {#if s.targetsError == null}<span class="muted"> ({s.targetsCount} 件)</span>
+                {:else}<span class="muted"> (まだありません。次の更新で書きます)</span>{/if}
+              </td>
+            </tr>
+            <tr>
+              <th>最後の照合</th>
+              <td>
+                {#if s.latest?.scannedAt}
+                  {new Date(s.latest.scannedAt).toLocaleString()} <span class="muted">({s.latest.repos} 件{s.latest.errors ? `、照合できなかったもの ${s.latest.errors} 件` : ""})</span>
+                {:else}
+                  <span class="muted">まだありません</span>
+                {/if}
+              </td>
+            </tr>
+            <tr>
+              <th>手元の脆弱性 DB</th>
+              <td>
+                {#if Object.keys(s.db).length}
+                  {Object.keys(s.db).join(", ")} <span class="muted">(最後に取った時刻: {new Date(Object.values(s.db).sort()[0]).toLocaleString()})</span>
+                {:else}
+                  <span class="muted">まだ取っていません (最初の照合で取ります。npm だけで約 200 MB)</span>
+                {/if}
+              </td>
+            </tr>
+            <tr>
+              <th>定期実行</th>
+              <td>
+                {#if s.task.registered}
+                  <span class="badge good">登録済み</span> <span class="muted">(タスク「{s.task.name}」)</span>
+                {:else if s.task.registered === false}
+                  <span class="badge mid">未登録</span> 全体の照合は定期実行で行います。LockWatch のフォルダで次を実行してください
+                  <div class="cmd">
+                    <code>{api.LOCKWATCH_REGISTER}</code>
+                    <button class="small" onclick={() => copyText(api.LOCKWATCH_REGISTER)}>コピー</button>
+                  </div>
+                {:else}
+                  <span class="muted">分かりません</span>
+                {/if}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        {#if lw.path !== (saved.lockwatchPath ?? "").trim()}
+          <p class="note">この場所はまだ保存していません。下の「保存」で使い始めます。</p>
+        {/if}
+      {/if}
+      <p class="note">
+        <button class="link" onclick={() => api.openUrl(api.LOCKWATCH_URL)}>LockWatch (GitHub)</button>
+      </p>
+    </section>
+    {/if}
+
     {#if tab === "other"}
     <section class="panel card">
       <h2>その他</h2>
@@ -510,20 +667,6 @@
         SessionVault は Claude Code のログを残し・検査する道具です。詳細パネルの Claude タブの「ログの検査」で使います (読むだけ)。
         Claude History Viewer を使っているなら、そのフォルダを指定すると、Viewer に同梱の SessionVault で、Viewer と同じ保管庫を見て検査します
         (Python 3.10 以上が要ります)。
-      </p>
-      <div class="grid">
-        <label for="lockwatch-path">LockWatch の場所</label>
-        <div class="inline">
-          <input id="lockwatch-path" type="text" class="mono grow" bind:value={draft.lockwatchPath} placeholder="空なら使わない" />
-          <button onclick={pickLockwatch}>参照</button>
-        </div>
-      </div>
-      <p class="note">
-        LockWatch は、リポジトリの lock ファイルを osv-scanner にかけて脆弱性を調べる道具です。LockWatch のリポジトリのフォルダを指定すると、
-        更新のたびに手元のリポジトリの一覧 (公開・非公開の別つき) を LockWatch に渡し、LockWatch の結果を詳細パネルの「脆弱性」タブと一覧の印に出します。
-        非公開と、公開か分からないリポジトリは、LockWatch がパッケージ名を外に出さずに手元の脆弱性 DB で照合します。
-        {#if app.vulns?.locations}<br />受け渡しのファイル: <span class="mono">{app.vulns.locations.targets}</span>{/if}
-        {#if app.vulns?.error}<br /><span class="gh-error">{app.vulns.error}</span>{/if}
       </p>
     </section>
 
@@ -835,6 +978,55 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+
+  /* 脆弱性 (LockWatch) の状態 */
+  .lw-status {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 10px 0 4px;
+  }
+
+  .lw-status th,
+  .lw-status td {
+    text-align: left;
+    vertical-align: top;
+    padding: 4px 8px 4px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .lw-status th {
+    font-weight: 500;
+    color: var(--muted);
+    white-space: nowrap;
+    width: 9em;
+  }
+
+  .lw-status .mono {
+    word-break: break-all;
+  }
+
+  .cmd {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .steps li {
+    margin: 4px 0;
+  }
+
+  .link {
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  .link:hover:not(:disabled) {
+    background: transparent;
   }
 
   .note {

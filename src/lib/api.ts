@@ -2,7 +2,23 @@
 // ブラウザで `pnpm dev` だけを開いたとき (Tauri の外) は、static/dev-snapshot.json を読む表示確認用のモードになる。
 // dev-snapshot.json は `cargo run --example dump -- ../static/dev-snapshot.json` で作る (git には入れない)。
 
-import type { Commit, Config, SessionFinding, Snapshot, TranscriptEntry, VulnCheck, VulnReport } from "./types";
+import type {
+  Commit,
+  Config,
+  LockwatchStatus,
+  SessionFinding,
+  Snapshot,
+  TranscriptEntry,
+  VulnCheck,
+  VulnReport,
+} from "./types";
+
+/** LockWatch の入手先 (設定と詳細パネルの案内に出す) */
+export const LOCKWATCH_URL = "https://github.com/lancard-aikawa/LockWatch";
+/** osv-scanner を入れるコマンド (LockWatch の README と同じ。版を固定する) */
+export const OSV_SCANNER_INSTALL = "winget install --id Google.OSVScanner --version 2.6.0 --exact";
+/** LockWatch の定期実行を登録するコマンド (LockWatch のフォルダで) */
+export const LOCKWATCH_REGISTER = "pwsh -File scripts\\register-task.ps1";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -61,6 +77,7 @@ type MockHooks = {
   __mockFindings?: SessionFinding[];
   __mockVulns?: VulnReport;
   __mockVulnCheck?: VulnCheck;
+  __mockLockwatchStatus?: LockwatchStatus;
   /** パス → アイコンの URL (data: など) */
   __mockIcons?: Record<string, string>;
 };
@@ -199,6 +216,16 @@ const noVulns: VulnReport = {
 export async function lockwatchResults(): Promise<VulnReport> {
   if (!inTauri) return hooks().__mockVulns ?? noVulns;
   return call("lockwatch_results");
+}
+
+/** LockWatch が使える状態か。path を渡せばその場所 (保存前の入力)、省けば設定の場所 */
+export async function lockwatchStatus(path?: string | null): Promise<LockwatchStatus> {
+  if (!inTauri) {
+    const given = hooks().__mockLockwatchStatus;
+    if (given) return given;
+    throw new Error("ブラウザ表示では確かめられません");
+  }
+  return call("lockwatch_status", { path: path ?? null });
 }
 
 /** 「今すぐ調べる」の事前チェック: 今照合したら前回の結果がそのまま返るか (照合はしない) */

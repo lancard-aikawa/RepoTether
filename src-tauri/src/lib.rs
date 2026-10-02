@@ -98,6 +98,28 @@ fn lockwatch_target(state: &AppState, repo_id: &str) -> Result<(core::lockwatch:
     Ok((runner, t.id.clone()))
 }
 
+/// LockWatch が使える状態か。path を渡せばその場所 (設定の画面で保存前に確かめる)、無ければ設定の場所
+#[tauri::command]
+async fn lockwatch_status(app: AppHandle, path: Option<String>) -> Result<core::lockwatch::Status, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = match path.filter(|p| !p.trim().is_empty()) {
+            Some(p) => p,
+            None => app
+                .state::<AppState>()
+                .config
+                .lock()
+                .unwrap()
+                .lockwatch_path
+                .clone()
+                .filter(|p| !p.trim().is_empty())
+                .ok_or("LockWatch の場所が決まっていません")?,
+        };
+        core::lockwatch::status(&core::lockwatch::resolve(&dir)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 「今すぐ調べる」の事前チェック: 今照合したら前回の結果がそのまま返るか (照合はしない)
 #[tauri::command]
 async fn lockwatch_check(app: AppHandle, repo_id: String) -> Result<core::lockwatch::Check, String> {
@@ -544,6 +566,7 @@ pub fn run() {
             get_claude_retention,
             set_claude_retention,
             lockwatch_results,
+            lockwatch_status,
             lockwatch_check,
             lockwatch_scan
         ])

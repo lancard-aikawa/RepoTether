@@ -143,6 +143,60 @@ fn parse_locations(stdout: &str) -> Result<Locations, String> {
     Ok(Locations { data_dir: path("_effective_data_dir")?, targets: path("_effective_targets")? })
 }
 
+// ---- 使える状態か (`lockwatch status --json`) ----
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct ScannerStatus {
+    pub path: Option<String>,
+    pub version: Option<String>,
+    /// 見つからない・動かないときの理由
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct LatestStatus {
+    pub scanned_at: Option<String>,
+    pub repos: u32,
+    pub errors: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct TaskStatus {
+    pub name: String,
+    /// Windows 以外や調べられないときは None
+    pub registered: Option<bool>,
+}
+
+/// `lockwatch status --json` の答え
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct Status {
+    /// LockWatch の版
+    pub lockwatch: String,
+    pub osv_scanner: ScannerStatus,
+    pub data_dir: String,
+    pub targets: String,
+    pub targets_count: Option<u32>,
+    pub targets_error: Option<String>,
+    /// 最後の照合。まだなら None
+    pub latest: Option<LatestStatus>,
+    /// 生態系 → 手元の脆弱性 DB を取った時刻
+    pub db: BTreeMap<String, String>,
+    pub task: TaskStatus,
+}
+
+/// LockWatch が使える状態か (osv-scanner・受け渡し・最後の照合・定期実行)。読むだけで、通信もしない
+pub fn status(r: &Runner) -> Result<Status, String> {
+    let o = run(r, &["status", "--json"], CONFIG_TIMEOUT)?;
+    if o.code != Some(0) {
+        return Err(error_line(&o, "LockWatch の状態を読めません (古い LockWatch かもしれません。0.1.0 以上にしてください)"));
+    }
+    serde_json::from_str(&o.stdout).map_err(|e| format!("LockWatch の状態を読めません: {e}"))
+}
+
 // ---- targets.json (RepoTether → LockWatch) ----
 
 /// targets.json の 1 件。キーは LockWatch に合わせて snake_case
@@ -527,6 +581,22 @@ mod tests {
         let json = serde_json::to_value(&rep).unwrap();
         assert!(json["byRepo"].as_object().unwrap().values().any(|v| v["result"]["scannedAt"].is_string()));
         let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn parses_status_answer() {
+        let s: Status = serde_json::from_str(
+            r#"{"lockwatch": "0.1.0", "data_dir": "C:\\lw\\data", "targets": "C:\\lw\\data\\targets.json",
+                "osv_scanner": {"path": null, "version": null, "error": "osv-scanner が PATH にありません"},
+                "targets_count": null, "targets_error": "ありません", "latest": null, "db": {},
+                "task": {"name": "LockWatch scan", "registered": false}}"#,
+        )
+        .unwrap();
+        assert!(s.osv_scanner.error.is_some());
+        assert_eq!(s.task.registered, Some(false));
+        let json = serde_json::to_value(&s).unwrap();
+        assert!(json["osvScanner"]["error"].is_string());
+        assert_eq!(json["targetsError"], "ありません");
     }
 
     #[test]

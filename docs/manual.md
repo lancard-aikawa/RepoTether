@@ -276,7 +276,8 @@ RepoTether からは検査だけを呼びます (ログは書き換えません)
 ### 脆弱性 (LockWatch)
 
 LockWatch は、リポジトリの lock ファイル (package-lock.json・pnpm-lock.yaml・uv.lock・Cargo.lock など) を
-osv-scanner にかけて、使っているパッケージの脆弱性を調べる別の道具です。設定「表示・その他」で LockWatch の場所を決めると、
+osv-scanner にかけて、使っているパッケージの脆弱性を調べる別の道具です (入れなくても RepoTether は使えます。
+入手と入れ方は [LockWatch](https://github.com/lancard-aikawa/LockWatch))。設定の「脆弱性」タブで LockWatch の場所を決めると、
 RepoTether は次のことをします。
 
 - 更新のたびに、手元のリポジトリの一覧を LockWatch に渡す (LockWatch のデータの `targets.json`。中身が変わったときだけ書く)。
@@ -392,6 +393,18 @@ GitHub / Gogs / Gitea を足します。
 
 ![アカウント](images/15_settings_accounts.png)
 
+### 脆弱性
+
+LockWatch ([脆弱性 (LockWatch)](#脆弱性-lockwatch)) を使うかを決めます。
+
+| 項目 | 中身 |
+|---|---|
+| LockWatch の場所 | LockWatch のフォルダ。空なら使わない。そのフォルダの `.venv` の Python (無ければ PATH の Python 3.10 以上) で動かす。受け渡しのファイルの場所は LockWatch 自身の設定に従う |
+| 確かめる | 入力した場所で LockWatch が使えるかを見る (保存前でもよい)。LockWatch の版、osv-scanner の有無と版、受け渡しのファイルと件数、最後の照合、手元の脆弱性 DB、定期実行が登録されているかを出す。タブを開いたときにも自動で確かめる |
+
+osv-scanner が無いときと、定期実行が登録されていないときは、入れるコマンド・登録するコマンドを出します (「コピー」でコピー)。
+詳細パネルの「脆弱性」タブにも同じ案内と、このタブを開くボタンが出ます。場所が空のときは、使い始めるまでの手順を出します。
+
 ### 表示・その他
 
 | 項目 | 中身 |
@@ -399,7 +412,6 @@ GitHub / Gogs / Gitea を足します。
 | クローン先の親フォルダ | クローンのダイアログの既定 |
 | Claude のログの場所 | 空なら `%USERPROFILE%\.claude\projects` |
 | SessionVault の場所 | 「ログの検査」で使う SessionVault。**Claude History Viewer のフォルダ**か `sessionvault.exe` を指定する。空なら PATH の sessionvault.exe。Viewer のフォルダなら、Viewer に同梱の SessionVault を Python (3.10 以上) で動かし、Viewer の設定 (`sessionvault_src` / `sessionvault_config`) に合わせて Viewer と同じ保管庫を見る。exe なら、保管庫の場所は exe の隣の `sessionvault.json` に従う |
-| LockWatch の場所 | 脆弱性を調べる LockWatch のリポジトリのフォルダ ([脆弱性 (LockWatch)](#脆弱性-lockwatch))。空なら使わない。そのフォルダの `.venv` の Python (無ければ PATH の Python 3.10 以上) で動かす。受け渡しのファイルの場所は LockWatch 自身の設定に従う |
 | Claude Code のログの保存期間 | Claude Code の `cleanupPeriodDays` (下を参照)。「変更」を押したときだけ書き込む |
 | テーマ | OS に合わせる / ライト / ダーク (タイトルバーも合わせる) |
 | 一覧の密度 | 標準 / コンパクト (行を詰め、Claude の一行要約を省く) |

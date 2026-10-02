@@ -1,7 +1,7 @@
 // アプリ全体の状態。設定・取り込み結果・更新中の表示。
 
 import * as api from "./api";
-import type { Config, Session, Snapshot, VulnReport } from "./types";
+import type { Config, LockwatchStatus, Session, Snapshot, VulnReport } from "./types";
 import * as tags_ from "./tags";
 
 export const app = $state({
@@ -19,6 +19,8 @@ export const app = $state({
   focusFolder: null as { path: string; label: string } | null,
   /** LockWatch の結果 (脆弱性)。LockWatch を使わない設定なら configured: false */
   vulns: null as VulnReport | null,
+  /** LockWatch が使える状態か (osv-scanner・定期実行など)。脆弱性タブの案内に使う。まだ確かめていなければ null */
+  lockwatchStatus: null as LockwatchStatus | null,
 });
 
 /** 画面の好み (その端末だけ)。失われても困らないものだけ置く */
@@ -55,7 +57,7 @@ export const prefs = $state({
   /** 一覧の密度: 標準 / コンパクト (行を詰め、Claude の一行要約を省く) */
   density: "normal" as "normal" | "compact",
   /** 設定で最後に開いたタブ */
-  settingsTab: "roots" as "roots" | "authors" | "accounts" | "other" | "hidden" | "errors",
+  settingsTab: "roots" as "roots" | "authors" | "accounts" | "vulns" | "other" | "hidden" | "errors",
   /** 脆弱性で隠すもの (深刻度 low など、知らせの種類 unmaintained など)。一覧の印にも効く */
   vulnHide: [] as string[],
 });
@@ -240,6 +242,8 @@ export async function refresh(includeRemote: boolean, scope: api.RefreshScope = 
 export async function loadVulns() {
   try {
     app.vulns = await api.lockwatchResults();
+    // 脆弱性タブの案内 (osv-scanner が無い・定期実行が未登録) に使う。一度確かめれば足りる
+    if (app.vulns.configured && !app.vulns.error && !app.lockwatchStatus) void loadLockwatchStatus();
   } catch (e) {
     app.vulns = {
       configured: true,
@@ -253,13 +257,30 @@ export async function loadVulns() {
   }
 }
 
+/** LockWatch の状態を確かめ直す (設定の場所)。使わない設定・失敗なら null */
+export async function loadLockwatchStatus() {
+  if (!app.config?.lockwatchPath?.trim()) {
+    app.lockwatchStatus = null;
+    return;
+  }
+  try {
+    app.lockwatchStatus = await api.lockwatchStatus();
+  } catch {
+    // 使えない理由は app.vulns.error に出るので、ここでは黙る
+    app.lockwatchStatus = null;
+  }
+}
+
 /** そのリポジトリだけ照合し直す。終わったら結果を差し替える。fresh ならキャッシュを使わない */
 export async function scanVulns(repoId: string, fresh = false) {
   app.vulns = await api.lockwatchScan(repoId, fresh);
 }
 
 export async function updateConfig(next: Config, opts: { refresh?: boolean; remote?: boolean } = {}) {
+  const lockwatchMoved = (next.lockwatchPath ?? "") !== (app.config?.lockwatchPath ?? "");
   app.config = await api.saveConfig(next);
+  // LockWatch の場所が変わったら、状態は次の読み込みで確かめ直す
+  if (lockwatchMoved) app.lockwatchStatus = null;
   if (opts.refresh) await refresh(opts.remote ?? false);
 }
 

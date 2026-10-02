@@ -118,6 +118,13 @@
     unchangedSince = null;
   });
 
+  /** 設定の「脆弱性」タブを開く (osv-scanner が無い・定期実行が未登録のときの案内から) */
+  function openLockwatchSettings() {
+    prefs.settingsTab = "vulns";
+    prefs.tab = "settings";
+    savePrefs();
+  }
+
   function toggleHide(k: string) {
     prefs.vulnHide = prefs.vulnHide.includes(k) ? prefs.vulnHide.filter((x) => x !== k) : [...prefs.vulnHide, k];
     savePrefs();
@@ -623,6 +630,18 @@
           <p class="muted small">このリポジトリは LockWatch の対象にありません (非表示にしたものは対象外です)。</p>
         {:else}
           <p class="muted small">{VISIBILITY_NOTE[vulns.visibility]}</p>
+          {@const lws = app.lockwatchStatus}
+          {#if lws?.osvScanner.error}
+            <p class="small"><span class="badge high">osv-scanner が使えません</span> {lws.osvScanner.error}</p>
+          {/if}
+          {#if lws?.task.registered === false}
+            <p class="small muted">
+              LockWatch の定期実行が登録されていないので、全体の照合は「今すぐ調べる」を押したものだけです。
+            </p>
+          {/if}
+          {#if lws?.osvScanner.error || lws?.task.registered === false}
+            <button class="small-btn" onclick={openLockwatchSettings}>設定の「脆弱性」を開く</button>
+          {/if}
           {#if scanError}<p class="err small">{scanError}</p>{/if}
           {@const res = vulns.result}
           {#if !res}

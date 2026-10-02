@@ -186,6 +186,23 @@ export interface RepoVulns {
   new: [string, string][];
 }
 
+/** LockWatch が使える状態か (lockwatch status --json) */
+export interface LockwatchStatus {
+  /** LockWatch の版 */
+  lockwatch: string;
+  osvScanner: { path: string | null; version: string | null; error: string | null };
+  dataDir: string;
+  targets: string;
+  targetsCount: number | null;
+  targetsError: string | null;
+  /** 最後の照合。まだなら null */
+  latest: { scannedAt: string | null; repos: number; errors: number } | null;
+  /** 生態系 → 手元の脆弱性 DB を取った時刻 */
+  db: Record<string, string>;
+  /** registered は Windows 以外・調べられないときは null */
+  task: { name: string; registered: boolean | null };
+}
+
 /** 「今すぐ調べる」の事前チェック (LockWatch の scan --check) の答え */
 export interface VulnCheck {
   id: string;
