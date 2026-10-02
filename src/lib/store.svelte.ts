@@ -1,7 +1,7 @@
 // アプリ全体の状態。設定・取り込み結果・更新中の表示。
 
 import * as api from "./api";
-import type { Config, Session, Snapshot } from "./types";
+import type { Config, Session, Snapshot, VulnReport } from "./types";
 import * as tags_ from "./tags";
 
 export const app = $state({
@@ -17,6 +17,8 @@ export const app = $state({
   openSession: null as Session | null,
   /** 状態タブのフォルダ表示で選んでいる階層。あれば「更新」はその下だけを読み直す */
   focusFolder: null as { path: string; label: string } | null,
+  /** LockWatch の結果 (脆弱性)。LockWatch を使わない設定なら configured: false */
+  vulns: null as VulnReport | null,
 });
 
 /** 画面の好み (その端末だけ)。失われても困らないものだけ置く */
@@ -54,11 +56,13 @@ export const prefs = $state({
   density: "normal" as "normal" | "compact",
   /** 設定で最後に開いたタブ */
   settingsTab: "roots" as "roots" | "authors" | "accounts" | "other" | "hidden" | "errors",
+  /** 脆弱性で隠すもの (深刻度 low など、知らせの種類 unmaintained など)。一覧の印にも効く */
+  vulnHide: [] as string[],
 });
 
 export type ReportViewMode = "edit" | "split" | "preview";
 
-export type DetailTab = "summary" | "git" | "commits" | "claude" | "readme";
+export type DetailTab = "summary" | "git" | "commits" | "claude" | "vulns" | "readme";
 
 export type StateGroup = "none" | "folder" | "tag";
 export type StateLayout = "list" | "explorer";
@@ -226,6 +230,32 @@ export async function refresh(includeRemote: boolean, scope: api.RefreshScope = 
     app.busy = false;
     app.progress = "";
   }
+  // 結果は LockWatch の定期実行で変わるので、更新のたびに読み直す (targets.json も今の一覧にそろう)
+  await loadVulns();
+}
+
+// ---- 脆弱性 (LockWatch) ----
+
+/** LockWatch の結果を読み直す。失敗は結果の error に入る (画面の更新は止めない) */
+export async function loadVulns() {
+  try {
+    app.vulns = await api.lockwatchResults();
+  } catch (e) {
+    app.vulns = {
+      configured: true,
+      error: errorText(e),
+      locations: null,
+      scannedAt: null,
+      osvScanner: null,
+      dbDownloadedAt: null,
+      byRepo: {},
+    };
+  }
+}
+
+/** そのリポジトリだけ照合し直す。終わったら結果を差し替える */
+export async function scanVulns(repoId: string) {
+  app.vulns = await api.lockwatchScan(repoId);
 }
 
 export async function updateConfig(next: Config, opts: { refresh?: boolean; remote?: boolean } = {}) {

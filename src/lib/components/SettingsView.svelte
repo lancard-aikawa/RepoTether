@@ -94,6 +94,11 @@
     if (p) draft.sessionvaultPath = p;
   }
 
+  async function pickLockwatch() {
+    const p = await api.pickFolder("LockWatch のリポジトリのフォルダ", draft.lockwatchPath ?? undefined);
+    if (p) draft.lockwatchPath = p;
+  }
+
   async function pickCloneRoot() {
     const p = await api.pickFolder("クローン先の親フォルダ", draft.cloneRoot ?? undefined);
     if (p) draft.cloneRoot = p;
@@ -167,8 +172,8 @@
           id: "other",
           label: "表示・その他",
           dirty: !same(
-            [draft.cloneRoot, draft.claudeDir, draft.sessionvaultPath],
-            [saved.cloneRoot, saved.claudeDir, saved.sessionvaultPath],
+            [draft.cloneRoot, draft.claudeDir, draft.sessionvaultPath, draft.lockwatchPath],
+            [saved.cloneRoot, saved.claudeDir, saved.sessionvaultPath, saved.lockwatchPath],
           ),
         },
         { id: "hidden", label: "非表示", count: draft.hidden.length, dirty: !same(draft.hidden, saved.hidden) },
@@ -505,6 +510,20 @@
         SessionVault は Claude Code のログを残し・検査する道具です。詳細パネルの Claude タブの「ログの検査」で使います (読むだけ)。
         Claude History Viewer を使っているなら、そのフォルダを指定すると、Viewer に同梱の SessionVault で、Viewer と同じ保管庫を見て検査します
         (Python 3.10 以上が要ります)。
+      </p>
+      <div class="grid">
+        <label for="lockwatch-path">LockWatch の場所</label>
+        <div class="inline">
+          <input id="lockwatch-path" type="text" class="mono grow" bind:value={draft.lockwatchPath} placeholder="空なら使わない" />
+          <button onclick={pickLockwatch}>参照</button>
+        </div>
+      </div>
+      <p class="note">
+        LockWatch は、リポジトリの lock ファイルを osv-scanner にかけて脆弱性を調べる道具です。LockWatch のリポジトリのフォルダを指定すると、
+        更新のたびに手元のリポジトリの一覧 (公開・非公開の別つき) を LockWatch に渡し、LockWatch の結果を詳細パネルの「脆弱性」タブと一覧の印に出します。
+        非公開と、公開か分からないリポジトリは、LockWatch がパッケージ名を外に出さずに手元の脆弱性 DB で照合します。
+        {#if app.vulns?.locations}<br />受け渡しのファイル: <span class="mono">{app.vulns.locations.targets}</span>{/if}
+        {#if app.vulns?.error}<br /><span class="gh-error">{app.vulns.error}</span>{/if}
       </p>
     </section>
 

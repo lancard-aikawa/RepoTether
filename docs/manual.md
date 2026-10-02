@@ -225,6 +225,7 @@ RepoTether は、ローカルの git リポジトリ、Claude Code のセッシ�
 | リポジトリ | 現在のブランチ・追跡先・既定のブランチ・最後の fetch、注意が要るブランチの表、リモート |
 | コミット | 自分のコミット (「他の人の分も」で全員分)。取り込み期間 (既定 365 日) を出し切ったら「次の 10 件を読む」で、それより前も読める |
 | Claude | 「ログの検査」([下を参照](#ログの検査))と、セッションの一覧 (タイトル・時間・プロンプト数・ブランチ・最初と最後のプロンプト・最後の返答)。「全文」で会話の全文、「再開」で続きから ([Claude のセッションを開く](#claude-のセッションを開く)) |
+| 脆弱性 | LockWatch の結果 ([下を参照](#脆弱性-lockwatch))。設定で LockWatch の場所を決めたときだけ、手元にあるリポジトリに出る |
 | README | リポジトリ直下の README (日本語版があれば優先)。無ければタブが出ない |
 
 ![リポジトリタブ](images/04_detail_repo.png)
@@ -271,6 +272,38 @@ RepoTether からは検査だけを呼びます (ログは書き換えません)
 
 直すときは SessionVault の `repair` / `restore` を、そのセッションを Claude Code で開いていないときに使います。
 サブフォルダで始めた会話は別の場所にログがあるので、そのプロジェクトに振り分けたセッションの場所をすべて調べます。
+
+### 脆弱性 (LockWatch)
+
+LockWatch は、リポジトリの lock ファイル (package-lock.json・pnpm-lock.yaml・uv.lock・Cargo.lock など) を
+osv-scanner にかけて、使っているパッケージの脆弱性を調べる別の道具です。設定「表示・その他」で LockWatch の場所を決めると、
+RepoTether は次のことをします。
+
+- 更新のたびに、手元のリポジトリの一覧を LockWatch に渡す (LockWatch のデータの `targets.json`。中身が変わったときだけ書く)。
+  非表示にしたリポジトリは渡さない
+- LockWatch の結果を、詳細パネルの「脆弱性」タブと、一覧の行の「脆弱性 N」(緊急・高の数) に出す
+- 「脆弱性」タブの「今すぐ調べる」で、そのリポジトリだけを LockWatch で照合し直す (全体は LockWatch の定期実行に任せる)
+
+**非公開のリポジトリのパッケージ名は外に出しません。**一覧を渡すときに、リポジトリごとに公開・非公開を付けます。
+
+| 付けるもの | 条件 | LockWatch の照合 |
+|---|---|---|
+| 公開 | 主なリモート (`origin`) が github.com にあり、リモートの一覧で公開 | オンライン (api.osv.dev) |
+| 非公開 | リモートのどれかが一覧で非公開。または Gogs・Gitea などの自前のサーバーにある (そこで公開でも、社内などの中での公開なので) | 手元の脆弱性 DB |
+| 不明 | リモートが無い・リモートの一覧に無い (一覧をまだ取っていない、アカウントを登録していないなど) | 手元の脆弱性 DB |
+
+タブの中身:
+
+| 表示 | 意味 |
+|---|---|
+| 緊急 / 高 / 中 / 低 / 不明 | 深刻度。GitHub の勧告の区分があればそれを、無ければ CVSS の点数から。どちらも無ければ不明 |
+| 保守終了・安全性の欠陥・お知らせ | 脆弱性ではない知らせ (RustSec の unmaintained / unsound / notice)。保守終了は、そのパッケージがもう直されないという意味 |
+| 新しく出た | LockWatch の前回の照合には無かったもの |
+| ID | 押すと osv.dev で詳しい説明を開く |
+| 直る版 | この版以上に上げれば直る |
+| 隠す | 深刻度や知らせの種類ごとに隠す。この PC で覚え、一覧の行の「脆弱性 N」にも効く |
+
+lock ファイルの無いプロジェクト (package.json だけなど) は調べられません。
 
 ### 未クローンとクローン
 
@@ -364,6 +397,7 @@ GitHub / Gogs / Gitea を足します。
 | クローン先の親フォルダ | クローンのダイアログの既定 |
 | Claude のログの場所 | 空なら `%USERPROFILE%\.claude\projects` |
 | SessionVault の場所 | 「ログの検査」で使う SessionVault。**Claude History Viewer のフォルダ**か `sessionvault.exe` を指定する。空なら PATH の sessionvault.exe。Viewer のフォルダなら、Viewer に同梱の SessionVault を Python (3.10 以上) で動かし、Viewer の設定 (`sessionvault_src` / `sessionvault_config`) に合わせて Viewer と同じ保管庫を見る。exe なら、保管庫の場所は exe の隣の `sessionvault.json` に従う |
+| LockWatch の場所 | 脆弱性を調べる LockWatch のリポジトリのフォルダ ([脆弱性 (LockWatch)](#脆弱性-lockwatch))。空なら使わない。そのフォルダの `.venv` の Python (無ければ PATH の Python 3.10 以上) で動かす。受け渡しのファイルの場所は LockWatch 自身の設定に従う |
 | Claude Code のログの保存期間 | Claude Code の `cleanupPeriodDays` (下を参照)。「変更」を押したときだけ書き込む |
 | テーマ | OS に合わせる / ライト / ダーク (タイトルバーも合わせる) |
 | 一覧の密度 | 標準 / コンパクト (行を詰め、Claude の一行要約を省く) |

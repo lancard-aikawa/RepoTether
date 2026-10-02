@@ -6,6 +6,7 @@ pub mod discover;
 pub mod gh;
 pub mod git;
 pub mod icon;
+pub mod lockwatch;
 pub mod model;
 pub mod remote;
 pub mod secrets;

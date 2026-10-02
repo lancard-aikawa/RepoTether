@@ -33,6 +33,9 @@ pub struct Config {
     /// SessionVault の場所。sessionvault.exe か、Claude History Viewer のフォルダ (同梱の SessionVault を Python で呼ぶ)。
     /// None なら PATH の sessionvault.exe
     pub sessionvault_path: Option<String>,
+    /// LockWatch (lock ファイルの脆弱性を調べる CLI) のリポジトリのフォルダ。None なら使わない
+    /// (targets.json を書かず、脆弱性のタブも出さない)
+    pub lockwatch_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -100,6 +103,7 @@ impl Default for Config {
             tag_defs: vec![],
             starred: vec![],
             sessionvault_path: None,
+            lockwatch_path: None,
         }
     }
 }

@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { Project } from "$lib/derive";
   import { relative } from "$lib/format";
-  import { errorText, setHidden, toast } from "$lib/store.svelte";
+  import { app, errorText, prefs, setHidden, toast } from "$lib/store.svelte";
+  import { heavyCount } from "$lib/vulns";
   import ProjectActions from "./ProjectActions.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
   import RepoIcon from "./RepoIcon.svelte";
@@ -44,6 +45,11 @@
     if (p.lastPushAt != null) out.push({ kind: "push", label: "push", title: "リモートに最後に push された", at: p.lastPushAt });
     return out;
   }
+
+  /** 重い脆弱性 (緊急・高) の数。詳細パネルの「隠す」で隠したものは数えない */
+  const heavy = $derived(
+    p.local ? heavyCount(app.vulns?.byRepo[p.local.id]?.result?.findings ?? [], prefs.vulnHide) : 0,
+  );
 
   async function toggleHidden() {
     try {
@@ -101,11 +107,14 @@
     {#if p.kind === "remote" && p.remotes[0]?.description}
       <div class="path muted">{p.remotes[0].description}</div>
     {/if}
-    {#if p.leftovers.length || (showTags && p.tags.length)}
+    {#if p.leftovers.length || heavy || (showTags && p.tags.length)}
       <div class="badges">
         {#each p.leftovers as l (l.kind)}
           <span class="badge {l.severity}" title={l.detail ?? ""}>{l.label}</span>
         {/each}
+        {#if heavy}
+          <span class="badge high" title="LockWatch の結果。緊急・高の脆弱性の数 (詳細パネルの「脆弱性」タブ)">脆弱性 {heavy}</span>
+        {/if}
         {#if showTags}
           {#each p.tags as t (t)}<span class="tag-chip"># {t}</span>{/each}
         {/if}

@@ -142,6 +142,61 @@ export interface Config {
   starred: string[];
   /** sessionvault.exe か Claude History Viewer のフォルダ。null なら PATH の sessionvault.exe */
   sessionvaultPath: string | null;
+  /** LockWatch のリポジトリのフォルダ。null なら使わない (脆弱性のタブを出さない) */
+  lockwatchPath: string | null;
+}
+
+// ---- LockWatch (src-tauri/src/core/lockwatch.rs) ----
+
+/** critical / high / medium / low / unknown */
+export type VulnSeverity = "critical" | "high" | "medium" | "low" | "unknown";
+
+/** LockWatch の結果の脆弱性 1 件 */
+export interface VulnFinding {
+  lockfile: string;
+  ecosystem: string;
+  package: string;
+  version: string;
+  id: string;
+  aliases: string[];
+  severity: VulnSeverity;
+  score: number | null;
+  fixed: string[];
+  /** 脆弱性ではない知らせの種類 (unmaintained / unsound / notice)。知らせでなければ null */
+  informational: string | null;
+  summary: string;
+}
+
+export interface VulnRepoResult {
+  status: "ok" | "no-lockfile" | "error";
+  mode: "online" | "offline";
+  scannedAt: string | null;
+  lockfiles: string[];
+  findings: VulnFinding[];
+  error: string | null;
+}
+
+export interface RepoVulns {
+  /** LockWatch での id */
+  targetId: string;
+  visibility: "public" | "private" | "unknown";
+  /** まだ照合していなければ null */
+  result: VulnRepoResult | null;
+  /** 前回から新しく出たもの [package, id] */
+  new: [string, string][];
+}
+
+export interface VulnReport {
+  /** 設定で LockWatch の場所が決まっているか */
+  configured: boolean;
+  /** LockWatch を呼べない・結果を読めないときの理由 */
+  error: string | null;
+  locations: { dataDir: string; targets: string } | null;
+  scannedAt: string | null;
+  osvScanner: string | null;
+  dbDownloadedAt: string | null;
+  /** LocalRepo.id → そのリポジトリの結果 */
+  byRepo: Record<string, RepoVulns>;
 }
 
 export type AccountKind = "github" | "gogs" | "gitea";

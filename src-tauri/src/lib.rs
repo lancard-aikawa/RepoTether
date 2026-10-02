@@ -17,12 +17,92 @@ struct AppState {
     config_path: PathBuf,
     cache_dir: PathBuf,
     refreshing: AtomicBool,
+    /// LockWatch のデータの場所。Python を起動して聞くので、設定の「LockWatch の場所」ごとに覚えておく
+    lockwatch_locations: Mutex<Option<(String, core::lockwatch::Locations)>>,
 }
 
 impl AppState {
     fn snapshot_path(&self) -> PathBuf {
         self.cache_dir.join("snapshot.json")
     }
+
+    /// LockWatch の呼び方と場所。設定で決めていなければ None
+    fn lockwatch(&self) -> Result<Option<(core::lockwatch::Runner, core::lockwatch::Locations)>, String> {
+        let Some(dir) = self.config.lock().unwrap().lockwatch_path.clone().filter(|p| !p.trim().is_empty()) else {
+            return Ok(None);
+        };
+        let runner = core::lockwatch::resolve(&dir)?;
+        if let Some((d, l)) = self.lockwatch_locations.lock().unwrap().as_ref() {
+            if *d == dir {
+                return Ok(Some((runner, l.clone())));
+            }
+        }
+        let l = core::lockwatch::locations(&runner)?;
+        *self.lockwatch_locations.lock().unwrap() = Some((dir, l.clone()));
+        Ok(Some((runner, l)))
+    }
+}
+
+/// 取り込み結果から targets.json の中身を作り、変わっていれば書く
+fn write_lockwatch_targets(
+    state: &AppState,
+    snap: &Snapshot,
+) -> Result<Option<(core::lockwatch::Runner, core::lockwatch::Locations, Vec<(String, core::lockwatch::Target)>)>, String> {
+    let Some((runner, loc)) = state.lockwatch()? else { return Ok(None) };
+    let hidden = state.config.lock().unwrap().hidden.clone();
+    let targets = core::lockwatch::build_targets(&snap.repos, &snap.remote_repos, &hidden);
+    let list: Vec<core::lockwatch::Target> = targets.iter().map(|(_, t)| t.clone()).collect();
+    core::lockwatch::write_targets(&loc.targets, &list)?;
+    Ok(Some((runner, loc, targets)))
+}
+
+/// 脆弱性の結果 (LockWatch の latest.json) を、手元のリポジトリごとにして返す
+fn lockwatch_report(state: &AppState) -> core::lockwatch::VulnReport {
+    let fail = |e: String| core::lockwatch::VulnReport { configured: true, error: Some(e), ..Default::default() };
+    let Some(snap) = core::load_snapshot(&state.snapshot_path()) else {
+        return match state.lockwatch() {
+            Ok(None) => Default::default(),
+            _ => fail("まだ取り込んでいません".into()),
+        };
+    };
+    match write_lockwatch_targets(state, &snap) {
+        Ok(None) => Default::default(),
+        Err(e) => fail(e),
+        Ok(Some((_, loc, targets))) => match core::lockwatch::read_latest(&loc.latest()) {
+            Ok(latest) => core::lockwatch::VulnReport {
+                locations: Some(loc),
+                ..core::lockwatch::report(&targets, latest.as_ref())
+            },
+            Err(e) => core::lockwatch::VulnReport { locations: Some(loc), ..fail(e) },
+        },
+    }
+}
+
+/// 脆弱性の結果。LockWatch を使わない設定なら configured: false
+#[tauri::command]
+async fn lockwatch_results(app: AppHandle) -> Result<core::lockwatch::VulnReport, String> {
+    tauri::async_runtime::spawn_blocking(move || lockwatch_report(&app.state::<AppState>()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// そのリポジトリだけ LockWatch で照合し直す (`lockwatch scan --id`)。repo_id は LocalRepo.id
+#[tauri::command]
+async fn lockwatch_scan(app: AppHandle, repo_id: String) -> Result<core::lockwatch::VulnReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let snap = core::load_snapshot(&state.snapshot_path()).ok_or("まだ取り込んでいません")?;
+        // 照合の前に targets.json を今の一覧にそろえる (新しく見つかったリポジトリも --id で選べるように)
+        let (runner, _, targets) = write_lockwatch_targets(&state, &snap)?.ok_or("設定で LockWatch の場所を決めてください")?;
+        let (_, t) = targets
+            .iter()
+            .find(|(id, _)| *id == repo_id)
+            .ok_or("このリポジトリは LockWatch の対象にありません (非表示にしたものは対象外です)")?;
+        core::lockwatch::scan_one(&runner, &t.id)?;
+        Ok(lockwatch_report(&state))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// トークンは返さない (資格情報マネージャーにあるかどうかだけ)
@@ -308,6 +388,20 @@ async fn refresh_inner(
     } else {
         core::carry_remote(local, prev.as_ref())
     };
+    // LockWatch を使う設定なら、手元のリポジトリの一覧を targets.json に書く (中身が変わったときだけ)
+    let (snap, err) = {
+        let app2 = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let err = write_lockwatch_targets(&app2.state::<AppState>(), &snap).err();
+            (snap, err)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+    };
+    let mut snap = snap;
+    if let Some(e) = err {
+        snap.errors.push(core::model::SourceError { source: "lockwatch".into(), message: format!("LockWatch: {e}") });
+    }
     core::save_snapshot(&snapshot_path, &snap)?;
     Ok(snap)
 }
@@ -406,6 +500,7 @@ pub fn run() {
                 config_path,
                 cache_dir,
                 refreshing: AtomicBool::new(false),
+                lockwatch_locations: Mutex::new(None),
             });
             Ok(())
         })
@@ -429,7 +524,9 @@ pub fn run() {
             session_transcript,
             sessionvault_verify,
             get_claude_retention,
-            set_claude_retention
+            set_claude_retention,
+            lockwatch_results,
+            lockwatch_scan
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

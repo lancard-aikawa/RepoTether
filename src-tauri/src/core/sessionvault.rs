@@ -61,7 +61,7 @@ pub fn resolve(configured: Option<&str>) -> Result<Runner, String> {
     })
 }
 
-fn on_path(name: &str) -> Option<PathBuf> {
+pub(crate) fn on_path(name: &str) -> Option<PathBuf> {
     std::env::var_os("PATH")
         .iter()
         .flat_map(std::env::split_paths)
@@ -71,7 +71,7 @@ fn on_path(name: &str) -> Option<PathBuf> {
 }
 
 /// py ランチャーを優先し、無ければ python
-fn find_python() -> Result<(PathBuf, Vec<String>), String> {
+pub(crate) fn find_python() -> Result<(PathBuf, Vec<String>), String> {
     if cfg!(windows) {
         if let Some(py) = on_path("py.exe") {
             return Ok((py, vec!["-3".into()]));

@@ -17,8 +17,10 @@
     toast,
     openTranscript,
     resumeSession,
+    scanVulns,
     type DetailTab,
   } from "$lib/store.svelte";
+  import * as vulnsLib from "$lib/vulns";
   import ProjectActions from "./ProjectActions.svelte";
   import ReadmeView from "./ReadmeView.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
@@ -98,6 +100,49 @@
     return () => (cancelled = true);
   });
 
+  // ---- 脆弱性 (LockWatch の結果) ----
+  const vulns = $derived(project.local ? app.vulns?.byRepo[project.local.id] ?? null : null);
+  const vulnAll = $derived(vulns?.result?.findings ?? []);
+  const vulnFindings = $derived(vulnsLib.visible(vulnAll, prefs.vulnHide));
+  const vulnHiddenCount = $derived(vulnAll.length - vulnFindings.length);
+  const vulnChoices = $derived(vulnsLib.hideChoices(vulnAll));
+  const isNewVuln = (pkg: string, id: string) => !!vulns?.new.some(([p, i]) => p === pkg && i === id);
+  let scanning = $state(false);
+  let scanError = $state("");
+  $effect(() => {
+    void project.key;
+    scanError = "";
+  });
+
+  function toggleHide(k: string) {
+    prefs.vulnHide = prefs.vulnHide.includes(k) ? prefs.vulnHide.filter((x) => x !== k) : [...prefs.vulnHide, k];
+    savePrefs();
+  }
+
+  async function runScan() {
+    if (!project.local) return;
+    const key = project.key;
+    scanning = true;
+    scanError = "";
+    try {
+      await scanVulns(project.local.id);
+    } catch (e) {
+      if (project.key === key) scanError = errorText(e);
+    } finally {
+      scanning = false;
+    }
+  }
+
+  const MODE_LABEL: Record<string, string> = {
+    online: "オンライン (api.osv.dev)",
+    offline: "手元の脆弱性 DB",
+  };
+  const VISIBILITY_NOTE: Record<string, string> = {
+    public: "公開リポジトリなので、オンライン (api.osv.dev) で照合します。",
+    private: "非公開リポジトリなので、パッケージ名を外に出さず、手元の脆弱性 DB で照合します。",
+    unknown: "公開か分からない (リモートが無い・リモートの一覧に無い) ので、手元の脆弱性 DB で照合します。",
+  };
+
   // ---- タブ ----
   const tabs = $derived(
     (
@@ -111,6 +156,13 @@
           show: project.commits.length > 0 || (project.kind === "local" && !project.local?.error),
         },
         { id: "claude", label: "Claude", count: project.sessions.length, show: project.sessions.length > 0 },
+        // LockWatch を使う設定で、手元にあるリポジトリだけ
+        {
+          id: "vulns",
+          label: "脆弱性",
+          count: vulnFindings.length || undefined,
+          show: !!app.vulns?.configured && !!project.local,
+        },
         // 読み込み中は出しておき、無いと分かったら消す (タブがちらつかないように)
         { id: "readme", label: "README", show: readme.state === "loading" || readme.state === "found" },
       ] as { id: DetailTab; label: string; count?: number; show: boolean }[]
@@ -515,6 +567,78 @@
       </section>
     {/if}
 
+    {#if tab === "vulns"}
+      <section>
+        <h3>
+          脆弱性
+          <button class="small-btn" onclick={runScan} disabled={scanning || !vulns} title="LockWatch で、このリポジトリだけ照合し直す">
+            {scanning ? "調べています…" : "今すぐ調べる"}
+          </button>
+        </h3>
+        {#if app.vulns?.error}
+          <p class="err small">{app.vulns.error}</p>
+        {:else if !vulns}
+          <p class="muted small">このリポジトリは LockWatch の対象にありません (非表示にしたものは対象外です)。</p>
+        {:else}
+          <p class="muted small">{VISIBILITY_NOTE[vulns.visibility]}</p>
+          {#if scanError}<p class="err small">{scanError}</p>{/if}
+          {@const res = vulns.result}
+          {#if !res}
+            <p class="small">まだ照合していません。「今すぐ調べる」か、LockWatch の定期実行を待ってください。</p>
+          {:else if res.status === "error"}
+            <p class="small"><span class="badge high">照合できません</span></p>
+            <pre class="small">{res.error}</pre>
+          {:else if res.status === "no-lockfile"}
+            <p class="small"><span class="badge low">lock ファイルなし</span></p>
+            <p class="muted small">
+              git が管理している lock ファイル (package-lock.json・pnpm-lock.yaml・uv.lock・Cargo.lock など) がありません。
+              lock ファイルの無いプロジェクトは、LockWatch では調べられません。
+            </p>
+          {:else}
+            <p class="small">
+              {#if vulnAll.length === 0}
+                <span class="badge good">見つかりません</span>
+              {:else}
+                {#each vulnsLib.counts(vulnFindings) as [sev, n] (sev)}
+                  <span class="badge {vulnsLib.SEVERITY_BADGE[sev]}">{vulnsLib.SEVERITY_LABEL[sev]} {n}</span>
+                {/each}
+              {/if}
+              <span class="muted">{when(res.scannedAt)} / {MODE_LABEL[res.mode] ?? res.mode}</span>
+            </p>
+            <p class="muted small mono">{res.lockfiles.join(", ")}</p>
+            {#if vulnChoices.length}
+              <div class="hide-row small">
+                <span class="muted">隠す:</span>
+                {#each vulnChoices as k (k)}
+                  <label class="check">
+                    <input type="checkbox" checked={prefs.vulnHide.includes(k)} onchange={() => toggleHide(k)} />
+                    {vulnsLib.choiceLabel(k)}
+                  </label>
+                {/each}
+              </div>
+            {/if}
+            <ul class="findings">
+              {#each vulnFindings as f (f.lockfile + f.package + f.version + f.id)}
+                <li>
+                  <span class="badge {vulnsLib.SEVERITY_BADGE[f.severity]}">{vulnsLib.SEVERITY_LABEL[f.severity]}</span>
+                  <span class="mono">{f.package} {f.version}</span>
+                  {#if f.informational}<span class="host">{vulnsLib.choiceLabel(f.informational)}</span>{/if}
+                  {#if isNewVuln(f.package, f.id)}<span class="host new">新しく出た</span>{/if}
+                  <div class="small">
+                    <button class="link mono" onclick={() => api.openUrl(`https://osv.dev/vulnerability/${encodeURIComponent(f.id)}`)} title="osv.dev で詳しく見る">{f.id}</button>
+                    {#if f.fixed.length}<span class="muted">直る版</span> <span class="mono">{f.fixed.join(", ")}</span>{:else}<span class="muted">直る版なし</span>{/if}
+                  </div>
+                  {#if f.summary}<div class="small">{f.summary}</div>{/if}
+                  <div class="muted small mono">{f.lockfile}</div>
+                </li>
+              {/each}
+            </ul>
+            {#if vulnHiddenCount}<p class="muted small">{vulnHiddenCount} 件を隠しています</p>{/if}
+          {/if}
+        {/if}
+      </section>
+    {/if}
+
     {#if tab === "readme"}
       {#if readme.state === "found"}
         <ReadmeView readme={readme.readme} link={webLink} />
@@ -789,6 +913,32 @@
 
   .findings .mono {
     word-break: break-all;
+  }
+
+  .hide-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .host.new {
+    color: var(--st-high);
+    border-color: var(--st-high);
+  }
+
+  /* 脆弱性の ID: 押すと osv.dev を開く */
+  .link {
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  .link:hover:not(:disabled) {
+    background: transparent;
   }
 
   .remotes {
