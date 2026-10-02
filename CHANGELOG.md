@@ -3,7 +3,7 @@
 <!-- 見出しは `## <版番号>` の形にすること (release.yml がこの節を Release の本文に使う)。
      まだ出していない変更は「## 未公開」に書き、リリースのときに版番号へ書き換える -->
 
-## 未公開
+## 0.6.0
 
 - [LockWatch](https://github.com/lancard-aikawa/LockWatch) (lock ファイルを osv-scanner にかけて脆弱性を調べる CLI。別に入れる) とつなぐ。
   設定の「脆弱性」タブで LockWatch のフォルダを指定すると、更新のたびに手元のリポジトリの一覧 (公開・非公開・不明の別つき) を LockWatch に渡し、
