@@ -2,6 +2,7 @@ name: release
 
 # タグを打つ = リリース。版はタグが正で、コード側 (package.json / src-tauri/Cargo.toml /
 # src-tauri/tauri.conf.json) と食い違っていたらビルドせずに落とす。
+# テストとビルドが通ったら、zip とインストーラーを付けた Release をそのまま公開する (下書きにしない)。
 #   git tag v0.1.0 && git push origin v0.1.0
 #
 # workflow_dispatch で手動実行するとビルドと検証だけ行い、成果物は Actions の artifact に置く (Release は作らない)。
@@ -133,14 +134,25 @@ jobs:
             "## $version の変更点", '', $body, '', $intro.Trim()
           )
 
-      - name: Release を作る (下書き)
+      # 下書きにせず、そのまま公開する。下書きにすると、GitHub のタグのページの「Release を作る」から
+      # 別の空の Release を作って公開してしまうことがある (0.7.0 で起きた)
+      - name: Release を作って公開する
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create '${{ github.ref_name }}' `
-            'dist/${{ steps.version.outputs.zip }}' `
-            'dist/${{ steps.dist.outputs.setup }}' `
-            --title 'RepoTether ${{ steps.version.outputs.version }}' `
-            --notes-file dist/release-body.md `
-            --draft
+          $tag = '${{ github.ref_name }}'
+          $files = @('dist/${{ steps.version.outputs.zip }}', 'dist/${{ steps.dist.outputs.setup }}')
+          $title = 'RepoTether ${{ steps.version.outputs.version }}'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            # ビルドの間にタグのページから手で作られていたら、新しく作らずにそれへファイルと本文を入れる
+            Write-Host "$tag の Release は既にあるので、ファイルと本文を入れて公開します"
+            gh release upload $tag @files --clobber
+            if ($LASTEXITCODE -ne 0) { throw "ファイルを付けられません" }
+            gh release edit $tag --title $title --notes-file dist/release-body.md --draft=false --latest
+            if ($LASTEXITCODE -ne 0) { throw "Release を直せません" }
+          } else {
+            gh release create $tag @files --title $title --notes-file dist/release-body.md --latest
+            if ($LASTEXITCODE -ne 0) { throw "Release を作れません" }
+          }

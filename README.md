@@ -105,7 +105,8 @@ tools/
 ### リリース
 
 `package.json`・`src-tauri/Cargo.toml`・`src-tauri/tauri.conf.json` の版を上げ、`CHANGELOG.md` にその版の節を書いてから、
-`v<版>` のタグを push する。GitHub Actions がビルドして、zip とインストーラーを付けた Release を下書きで作る。
+`v<版>` のタグを push する。GitHub Actions がテスト・ビルドして、zip とインストーラーを付けた Release をそのまま公開する
+(下書きにはしない。GitHub のタグのページから Release を作る操作は要らない。ビルド中に作ってしまっても、Actions がそこへファイルと本文を入れる)。
 
 ## ライセンス
 
