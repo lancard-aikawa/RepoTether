@@ -2,7 +2,7 @@
 //
 // 「隠す」は、深刻度 (low など) か知らせの種類 (unmaintained など) を選ぶ。LockWatch の report --hide と同じ考え方
 
-import type { VulnFinding, VulnSeverity } from "./types";
+import type { VulnFinding, VulnNotice, VulnSeverity } from "./types";
 
 export const SEVERITIES: VulnSeverity[] = ["critical", "high", "medium", "low", "unknown"];
 /** RustSec の知らせの種類 (脆弱性ではないもの) */
@@ -72,4 +72,39 @@ export function hideChoices(findings: readonly VulnFinding[]): string[] {
 
 export function choiceLabel(k: string): string {
   return SEVERITY_LABEL[k] ?? INFORMATIONAL_LABEL[k] ?? k;
+}
+
+// ---- lock ファイルの健全性の注意 (LockWatch の design.md §3.5)。文は LockWatch の hygiene.describe と同じにする
+
+export const NOTICE_LABEL: Record<string, string> = {
+  unpinned: "版を固定していない",
+  "not-registry": "レジストリ以外から取得",
+  "no-integrity": "ハッシュなし",
+  recent: "公開直後の版",
+};
+
+/** 公開直後の版とみなす日数 (LockWatch の hygiene.RECENT_DAYS) */
+const RECENT_DAYS = 7;
+
+export function noticeLabel(kind: string): string {
+  return NOTICE_LABEL[kind] ?? kind;
+}
+
+/** 注意 1 件の説明の文 */
+export function noticeText(n: Pick<VulnNotice, "kind" | "detail">): string {
+  const d = n.detail;
+  switch (n.kind) {
+    case "unpinned":
+      return d ? `版を固定していません (${d})。照合は不正確か、行われていません` : "版の指定がありません。照合されていません";
+    case "not-registry":
+      return `レジストリ以外から取得: ${d}`;
+    case "no-integrity":
+      return d
+        ? `${d} 個のパッケージにハッシュ (integrity) がありません (ハッシュを書かない古い形式の lock ファイル)`
+        : "ハッシュ (integrity) がありません";
+    case "recent":
+      return `公開から ${RECENT_DAYS} 日たっていません (公開 ${d})`;
+    default:
+      return d;
+  }
 }

@@ -48,7 +48,7 @@ pub fn resolve(dir: &str) -> Result<Runner, String> {
         return Ok(Runner { python: venv, python_args: vec![], src });
     }
     let (python, python_args) = sessionvault::find_python()
-        .map_err(|_| "LockWatch を動かす Python (3.10 以上) が見つかりません。LockWatch のフォルダで uv sync を実行してください".to_string())?;
+        .map_err(|_| "LockWatch を動かす Python (3.11 以上) が見つかりません。LockWatch のフォルダで uv sync を実行してください".to_string())?;
     Ok(Runner { python, python_args, src })
 }
 
@@ -375,7 +375,24 @@ pub struct RepoResult {
     pub scanned_at: Option<String>,
     pub lockfiles: Vec<String>,
     pub findings: Vec<Finding>,
+    /// lock ファイルの健全性の注意。古い LockWatch の結果には無い (空)
+    pub notices: Vec<Notice>,
     pub error: Option<String>,
+}
+
+/// lock ファイルそのものを読んで分かったこと (LockWatch の design.md §3.5)。脆弱性とは別
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct Notice {
+    pub lockfile: String,
+    /// unpinned / not-registry / no-integrity / recent
+    pub kind: String,
+    pub package: String,
+    pub version: String,
+    /// kind ごとの中身 (書かれている版の指定、取得元、件数、公開の時刻)
+    pub detail: String,
+    /// 前回から新しく出たものか。latest.json には無く、`report` が new_notices から付ける
+    pub fresh: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -390,12 +407,23 @@ pub struct NewFinding {
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 #[serde(default)]
+pub struct NewNotice {
+    pub repo: String,
+    pub lockfile: String,
+    pub kind: String,
+    pub package: String,
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
 pub struct Latest {
     pub scanned_at: Option<String>,
     pub osv_scanner: Option<String>,
     pub db_downloaded_at: Option<String>,
     pub repos: BTreeMap<String, RepoResult>,
     pub new: Vec<NewFinding>,
+    pub new_notices: Vec<NewNotice>,
 }
 
 /// latest.json を読む。まだ無ければ None
@@ -443,7 +471,14 @@ pub struct VulnReport {
 pub fn report(targets: &[(String, Target)], latest: Option<&Latest>) -> VulnReport {
     let mut by_repo = BTreeMap::new();
     for (local_id, t) in targets {
-        let result = latest.and_then(|l| l.repos.get(&t.id)).cloned();
+        let mut result = latest.and_then(|l| l.repos.get(&t.id)).cloned();
+        if let (Some(res), Some(l)) = (result.as_mut(), latest) {
+            for n in &mut res.notices {
+                n.fresh = l.new_notices.iter().any(|x| {
+                    x.repo == t.id && x.lockfile == n.lockfile && x.kind == n.kind && x.package == n.package && x.version == n.version
+                });
+            }
+        }
         let new = latest
             .map(|l| l.new.iter().filter(|n| n.repo == t.id).map(|n| (n.package.clone(), n.id.clone())).collect())
             .unwrap_or_default();
@@ -623,8 +658,12 @@ mod tests {
                 "repos": {"github.com/me/pub": {"status": "ok", "mode": "online", "scanned_at": "2026-10-02T09:00:00+09:00",
                   "lockfiles": ["pnpm-lock.yaml"], "findings": [{"lockfile": "pnpm-lock.yaml", "ecosystem": "npm",
                   "package": "vite", "version": "6.0.1", "id": "GHSA-x", "aliases": [], "severity": "high", "score": 7.5,
-                  "fixed": ["6.0.9"], "informational": null, "summary": "s", "future_key": 1}]}},
-                "new": [{"repo": "github.com/me/pub", "package": "vite", "id": "GHSA-x", "severity": "high", "informational": null}]}"#,
+                  "fixed": ["6.0.9"], "informational": null, "summary": "s", "future_key": 1}],
+                  "notices": [{"lockfile": "requirements.txt", "kind": "unpinned", "package": "jinja2", "version": "", "detail": ""},
+                              {"lockfile": "uv.lock", "kind": "recent", "package": "fresh", "version": "2.0.0", "detail": "2026-10-03T08:00:00Z"}]}},
+                "new": [{"repo": "github.com/me/pub", "package": "vite", "id": "GHSA-x", "severity": "high", "informational": null}],
+                "new_notices": [{"repo": "github.com/me/pub", "lockfile": "uv.lock", "kind": "recent", "package": "fresh", "version": "2.0.0"},
+                                {"repo": "github.com/me/other", "lockfile": "requirements.txt", "kind": "unpinned", "package": "jinja2", "version": ""}]}"#,
         )
         .unwrap();
         let latest = read_latest(&path).unwrap().unwrap();
@@ -638,6 +677,10 @@ mod tests {
         let res = pubr.result.as_ref().unwrap();
         assert_eq!(res.findings[0].fixed, ["6.0.9"]);
         assert!(!res.findings[0].malicious, "malicious の無い古い結果は false");
+        // 注意。新しく出た印は、同じリポジトリの new_notices にあるものだけ
+        assert_eq!(res.notices.iter().map(|n| (n.package.as_str(), n.fresh)).collect::<Vec<_>>(), [("jinja2", false), ("fresh", true)]);
+        let old: RepoResult = serde_json::from_str(r#"{"status": "ok", "findings": []}"#).unwrap();
+        assert!(old.notices.is_empty(), "notices の無い古い結果は空");
         let mal: Finding = serde_json::from_str(r#"{"package": "evil", "id": "MAL-2026-1", "severity": "critical", "malicious": true}"#).unwrap();
         assert!(mal.malicious);
         assert_eq!(serde_json::to_value(&mal).unwrap()["malicious"], true);

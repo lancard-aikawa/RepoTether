@@ -61,3 +61,15 @@ test("hideChoices はその結果に出てくるものだけ。表に無い知�
   assert.equal(v.choiceLabel("unmaintained"), "保守終了");
   assert.equal(v.choiceLabel("yanked"), "yanked");
 });
+
+test("注意の文は LockWatch の表示と同じ。知らない種類もそのまま出す", () => {
+  assert.equal(v.noticeText({ kind: "unpinned", detail: ">=1.24.1" }), "版を固定していません (>=1.24.1)。照合は不正確か、行われていません");
+  assert.equal(v.noticeText({ kind: "unpinned", detail: "" }), "版の指定がありません。照合されていません");
+  assert.equal(v.noticeText({ kind: "not-registry", detail: "git+ssh://github.com/x/y.git" }), "レジストリ以外から取得: git+ssh://github.com/x/y.git");
+  assert.equal(v.noticeText({ kind: "no-integrity", detail: "" }), "ハッシュ (integrity) がありません");
+  assert.match(v.noticeText({ kind: "no-integrity", detail: "577" }), /^577 個のパッケージ/);
+  assert.match(v.noticeText({ kind: "recent", detail: "2026-10-03T08:00:00Z" }), /7 日たっていません \(公開 2026-10-03T08:00:00Z\)/);
+  assert.equal(v.noticeText({ kind: "future", detail: "x" }), "x");
+  assert.equal(v.noticeLabel("recent"), "公開直後の版");
+  assert.equal(v.noticeLabel("future"), "future");
+});

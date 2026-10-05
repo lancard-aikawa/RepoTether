@@ -696,6 +696,23 @@
               {/each}
             </ul>
             {#if vulnHiddenCount}<p class="muted small">{vulnHiddenCount} 件を隠しています</p>{/if}
+            {#if res.notices.length}
+              <p class="small">
+                <span class="badge mid">注意 {res.notices.length}</span>
+                <span class="muted">脆弱性の照合とは別に、lock ファイルを読んで分かったこと</span>
+              </p>
+              <ul class="findings">
+                {#each res.notices as n (n.lockfile + n.kind + n.package + n.version + n.detail)}
+                  <li>
+                    <span class="host">{vulnsLib.noticeLabel(n.kind)}</span>
+                    {#if n.package}<span class="mono">{n.package} {n.version}</span>{/if}
+                    {#if n.fresh}<span class="host new">新しく出た</span>{/if}
+                    <div class="small">{vulnsLib.noticeText(n)}</div>
+                    <div class="muted small mono">{n.lockfile}</div>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
           {/if}
         {/if}
       </section>

@@ -175,7 +175,22 @@ export interface VulnRepoResult {
   scannedAt: string | null;
   lockfiles: string[];
   findings: VulnFinding[];
+  /** lock ファイルの健全性の注意 (脆弱性とは別)。古い LockWatch の結果では空 */
+  notices: VulnNotice[];
   error: string | null;
+}
+
+/** LockWatch が lock ファイルそのものを読んで分かったこと */
+export interface VulnNotice {
+  lockfile: string;
+  /** unpinned / not-registry / no-integrity / recent */
+  kind: string;
+  package: string;
+  version: string;
+  /** kind ごとの中身 (書かれている版の指定、取得元、件数、公開の時刻) */
+  detail: string;
+  /** 前回から新しく出たものか */
+  fresh: boolean;
 }
 
 export interface RepoVulns {

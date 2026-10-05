@@ -601,7 +601,7 @@
             <button class="small" onclick={() => copyText(api.OSV_SCANNER_INSTALL)}>コピー</button>
           </li>
           <li>
-            LockWatch を入れる (Python 3.10 以上と uv が要ります。手順は
+            LockWatch を入れる (Python 3.11 以上と uv が要ります。手順は
             <button class="link" onclick={() => api.openUrl(api.LOCKWATCH_URL + "#入れ方")}>LockWatch の README</button>)
           </li>
           <li>上の「LockWatch の場所」に LockWatch のフォルダを指定し、「確かめる」で使えるかを見てから保存する</li>
