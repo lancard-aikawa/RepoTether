@@ -17,8 +17,8 @@ import type {
 export const LOCKWATCH_URL = "https://github.com/lancard-aikawa/LockWatch";
 /** osv-scanner を入れるコマンド (LockWatch の README と同じ。版を固定する) */
 export const OSV_SCANNER_INSTALL = "winget install --id Google.OSVScanner --version 2.6.0 --exact";
-/** LockWatch の定期実行を登録するコマンド (LockWatch のフォルダで) */
-export const LOCKWATCH_REGISTER = "pwsh -File scripts\\register-task.ps1";
+/** LockWatch の定期実行を登録するコマンド (LockWatch のフォルダで)。pwsh は入っていない環境があるので、Windows に最初からある powershell で書く */
+export const LOCKWATCH_REGISTER = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\register-task.ps1";
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
