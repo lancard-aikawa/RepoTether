@@ -683,6 +683,7 @@
                 <li>
                   <span class="badge {vulnsLib.SEVERITY_BADGE[f.severity]}">{vulnsLib.SEVERITY_LABEL[f.severity]}</span>
                   <span class="mono">{f.package} {f.version}</span>
+                  {#if f.malicious}<span class="badge high">{vulnsLib.MALICIOUS_LABEL}</span>{/if}
                   {#if f.informational}<span class="host">{vulnsLib.choiceLabel(f.informational)}</span>{/if}
                   {#if isNewVuln(f.package, f.id)}<span class="host new">新しく出た</span>{/if}
                   <div class="small">

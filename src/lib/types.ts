@@ -164,6 +164,8 @@ export interface VulnFinding {
   fixed: string[];
   /** 脆弱性ではない知らせの種類 (unmaintained / unsound / notice)。知らせでなければ null */
   informational: string | null;
+  /** 悪意あるコードの記録 (OSV の MAL-) か */
+  malicious: boolean;
   summary: string;
 }
 

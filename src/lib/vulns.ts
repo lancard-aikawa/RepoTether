@@ -22,6 +22,9 @@ export const INFORMATIONAL_LABEL: Record<string, string> = {
   notice: "お知らせ",
 };
 
+/** 悪意あるコードの記録 (OSV の MAL-) に付ける印。LockWatch が深刻度を「緊急」にして渡す */
+export const MALICIOUS_LABEL = "悪意あるコード";
+
 /** 画面の印の色 (app.css の .badge.high など) */
 export const SEVERITY_BADGE: Record<string, string> = {
   critical: "high",

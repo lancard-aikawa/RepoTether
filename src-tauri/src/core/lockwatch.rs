@@ -155,17 +155,51 @@ fn windowed(python: &Path) -> PathBuf {
     if w.is_file() { w } else { python.to_path_buf() }
 }
 
+/// `sys.base_prefix` (本体の Python のフォルダ) にある pythonw.exe。無ければ None
+fn pythonw_in(base_prefix: &str) -> Option<PathBuf> {
+    let base = base_prefix.trim();
+    if base.is_empty() {
+        return None;
+    }
+    let w = Path::new(base).join("pythonw.exe");
+    w.is_file().then_some(w)
+}
+
+/// 窓を出さずに画面を開ける Python: 本体 (`sys.base_prefix`) の pythonw.exe。
+/// venv の pythonw.exe は使わない。uv 0.11 の venv ではコンソール用の起動役 (PE の subsystem が console) で、
+/// 黒い窓が一緒に開く (2026-10-05 に「LockWatch を開く」で確認。LockWatch の scripts/find-pythonw.ps1 と同じ考え方)
+fn base_pythonw(r: &Runner) -> Option<PathBuf> {
+    let mut cmd = Command::new(&r.python);
+    cmd.args(&r.python_args)
+        .args(["-c", "import sys; print(sys.base_prefix)"])
+        .env("PYTHONIOENCODING", "utf-8")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    util::hide_window(&mut cmd);
+    let out = cmd.output().ok()?;
+    pythonw_in(&String::from_utf8_lossy(&out.stdout))
+}
+
 /// LockWatch の画面 (`lockwatch gui`) を開く。終わるのを待たない
 pub fn open_gui(r: &Runner) -> Result<(), String> {
-    let mut cmd = Command::new(windowed(&r.python));
-    cmd.args(&r.python_args)
-        .args(["-m", "lockwatch", "gui"])
+    let mut cmd = match base_pythonw(r) {
+        // 本体の pythonw.exe には、py ランチャー用の引数 (-3) は付けない
+        Some(w) => Command::new(w),
+        None => {
+            let mut c = Command::new(windowed(&r.python));
+            c.args(&r.python_args);
+            c
+        }
+    };
+    cmd.args(["-m", "lockwatch", "gui"])
         .env("PYTHONPATH", &r.src)
         .env("PYTHONDONTWRITEBYTECODE", "1")
         .current_dir(r.src.parent().unwrap_or(&r.src))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // 本体の pythonw.exe が見つからず、コンソール用の Python で開くときも、黒い窓は出さない
+    util::hide_window(&mut cmd);
     cmd.spawn().map(|_| ()).map_err(|e| format!("LockWatch の画面を開けません: {e}"))
 }
 
@@ -326,6 +360,8 @@ pub struct Finding {
     pub fixed: Vec<String>,
     /// 脆弱性ではない知らせの種類 (unmaintained / unsound / notice)。知らせでなければ None
     pub informational: Option<String>,
+    /// 悪意あるコードの記録 (OSV の MAL-) か。LockWatch 0.2.0 までの結果には無い (false)
+    pub malicious: bool,
     pub summary: String,
 }
 
@@ -601,6 +637,10 @@ mod tests {
         let pubr = &rep.by_repo[&util::path_key(r"C:\Repos\pub")];
         let res = pubr.result.as_ref().unwrap();
         assert_eq!(res.findings[0].fixed, ["6.0.9"]);
+        assert!(!res.findings[0].malicious, "malicious の無い古い結果は false");
+        let mal: Finding = serde_json::from_str(r#"{"package": "evil", "id": "MAL-2026-1", "severity": "critical", "malicious": true}"#).unwrap();
+        assert!(mal.malicious);
+        assert_eq!(serde_json::to_value(&mal).unwrap()["malicious"], true);
         assert_eq!(pubr.new, [("vite".to_string(), "GHSA-x".to_string())]);
         assert!(rep.by_repo[&util::path_key(r"C:\Repos\x")].result.is_none(), "まだ照合していない");
         // 画面へは camelCase
@@ -619,6 +659,17 @@ mod tests {
         std::fs::write(d.join("pyw.exe"), "").unwrap();
         assert_eq!(windowed(&d.join("py.exe")), d.join("pyw.exe"));
         assert_eq!(windowed(Path::new("/usr/bin/python3")), PathBuf::from("/usr/bin/python3"));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn gui_prefers_pythonw_of_the_base_python() {
+        let d = tmp("basepyw");
+        let base = d.to_string_lossy().into_owned();
+        assert_eq!(pythonw_in(&format!("{base}\r\n")), None, "pythonw.exe が無ければ使わない");
+        std::fs::write(d.join("pythonw.exe"), "").unwrap();
+        assert_eq!(pythonw_in(&format!("{base}\r\n")), Some(d.join("pythonw.exe")), "python の出力の改行は除く");
+        assert_eq!(pythonw_in(""), None, "python が答えなかった");
         let _ = std::fs::remove_dir_all(d);
     }
 
