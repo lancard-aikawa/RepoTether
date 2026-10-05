@@ -1,0 +1,4 @@
+# @sveltejs/kit 2.x は cookie ^0.6.0 に固定されている。0.6.0 には GHSA-pxg6-pf52-xh8x があり、
+# 直った 0.7 系は kit 2.x の範囲に入らないので、ここで上書きする。kit 3 に上げたら外す。
+overrides:
+  cookie: ^0.7.0
