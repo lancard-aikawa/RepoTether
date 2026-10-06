@@ -144,6 +144,18 @@ export interface Config {
   sessionvaultPath: string | null;
   /** LockWatch のリポジトリのフォルダ。null なら使わない (脆弱性のタブを出さない) */
   lockwatchPath: string | null;
+  /** 外部ツール。VS Code などのボタンの横に並べ、プロジェクトのフォルダを渡して起動する */
+  externalTools: ExternalTool[];
+}
+
+export interface ExternalTool {
+  id: string;
+  /** ボタンに出す名前 */
+  label: string;
+  /** プログラムの場所 (PATH にあれば名前だけでもよい) */
+  command: string;
+  /** 引数。{path} がフォルダのパスになる。{path} が無ければ最後にフォルダのパスを足す */
+  args: string;
 }
 
 // ---- LockWatch (src-tauri/src/core/lockwatch.rs) ----

@@ -3,7 +3,7 @@
   import { SvelteSet } from "svelte/reactivity";
   import type { Project } from "$lib/derive";
   import { emailCandidates } from "$lib/derive";
-  import type { Account, AccountKind, Config, LockwatchStatus } from "$lib/types";
+  import type { Account, AccountKind, Config, ExternalTool, LockwatchStatus } from "$lib/types";
   import * as api from "$lib/api";
   import {
     app,
@@ -63,7 +63,29 @@
     }
   }
 
-  const dirty = $derived(JSON.stringify(draft) !== JSON.stringify(app.config));
+  const configDirty = $derived(JSON.stringify(draft) !== JSON.stringify(app.config));
+
+  // 画面の好み (この PC だけ) の下書き。設定と同じく、保存するまで反映しない
+  const PREF_KEYS = [
+    "theme",
+    "terminal",
+    "density",
+    "autoLocalMin",
+    "autoRemoteMin",
+    "autoActiveDays",
+    "fetchOnRemote",
+    "includeAutomated",
+  ] as const;
+  type PrefDraft = Pick<typeof prefs, (typeof PREF_KEYS)[number]>;
+  const pickPrefs = () => Object.fromEntries(PREF_KEYS.map((k) => [k, prefs[k]])) as PrefDraft;
+  let prefDraft = $state(pickPrefs());
+  const prefsDirty = $derived(PREF_KEYS.some((k) => prefDraft[k] !== prefs[k]));
+
+  /** 設定ファイル以外 (画面の好み・Claude Code の保存期間) に、保存していない変更があるか */
+  function extraDirty() {
+    return prefsDirty || retentionChanged;
+  }
+  const dirty = $derived(configDirty || extraDirty());
   const candidates = $derived(
     app.snapshot
       ? emailCandidates(app.snapshot)
@@ -166,6 +188,21 @@
     if (p) draft.cloneRoot = p;
   }
 
+  function addTool() {
+    const ids = new Set(draft.externalTools.map((t) => t.id));
+    let i = 1;
+    while (ids.has(`tool${i}`)) i++;
+    draft.externalTools.push({ id: `tool${i}`, label: "", command: "", args: "" });
+  }
+
+  async function pickTool(t: ExternalTool) {
+    const p = await api.pickFile("起動するプログラム", t.command || undefined, api.isWindows ? ["exe", "cmd", "bat"] : undefined);
+    if (!p) return;
+    t.command = p;
+    // 名前が空なら、ファイル名 (拡張子なし) を入れておく
+    if (!t.label.trim()) t.label = p.split(/[\\/]/).pop()!.replace(/\.[^.]+$/, "");
+  }
+
   function addEmail(e: string) {
     const v = e.trim();
     if (v && !draft.authorEmails.some((x) => x.toLowerCase() === v.toLowerCase())) draft.authorEmails.push(v);
@@ -193,14 +230,26 @@
   }
 
   async function save() {
+    if (retentionChanged && chosenDays != null && (!Number.isInteger(chosenDays) || chosenDays < 1 || chosenDays > 36500)) {
+      toast("保存期間は 1〜36500 日にしてください");
+      return;
+    }
     saving = true;
     try {
+      // 読み直すのは設定ファイルの中身を変えたときだけ (テーマなどを変えただけなら読み直さない)
+      const changed = configDirty;
       const accountsChanged = JSON.stringify(draft.accounts) !== JSON.stringify(app.config?.accounts);
-      await updateConfig(structuredClone($state.snapshot(draft)));
+      if (changed) await updateConfig(structuredClone($state.snapshot(draft)));
+      if (retentionChanged) retention = await api.setClaudeRetention(chosenDays);
+      if (prefsDirty) {
+        Object.assign(prefs, $state.snapshot(prefDraft));
+        savePrefs();
+        applyTheme();
+      }
       // 入力したトークンは保存後に消えるので、保存後の設定から下書きを作り直す
       revert();
       toast("保存しました");
-      await refresh(accountsChanged);
+      if (changed) await refresh(accountsChanged);
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -211,6 +260,8 @@
   function revert() {
     draft = structuredClone($state.snapshot(app.config!));
     replacing.clear();
+    prefDraft = pickPrefs();
+    if (retention) syncChoice(retention);
   }
 
   // ---- タブ ----
@@ -234,10 +285,12 @@
         {
           id: "other",
           label: "表示・その他",
-          dirty: !same(
-            [draft.cloneRoot, draft.claudeDir, draft.sessionvaultPath],
-            [saved.cloneRoot, saved.claudeDir, saved.sessionvaultPath],
-          ),
+          dirty:
+            extraDirty() ||
+            !same(
+              [draft.cloneRoot, draft.claudeDir, draft.sessionvaultPath, draft.externalTools],
+              [saved.cloneRoot, saved.claudeDir, saved.sessionvaultPath, saved.externalTools],
+            ),
         },
         { id: "hidden", label: "非表示", count: draft.hidden.length, dirty: !same(draft.hidden, saved.hidden) },
         { id: "errors", label: "問題", count: app.snapshot?.errors.length ?? 0, dirty: false },
@@ -257,23 +310,12 @@
     { id: "dark", label: "ダーク" },
   ];
 
-  function setFetch(v: boolean) {
-    prefs.fetchOnRemote = v;
-    savePrefs();
-  }
-
-  function setAuto(k: "autoLocalMin" | "autoRemoteMin" | "autoActiveDays", v: number) {
-    prefs[k] = v;
-    savePrefs();
-  }
-
   // ---- Claude Code の保存期間 (~/.claude/settings.json の cleanupPeriodDays) ----
-  // 設定の下書きとは別に、「変更」を押したときだけ Claude Code の設定ファイルへ書く
+  // 選んだ値は下書き。保存のときに Claude Code の設定ファイルへ書く
   let retention = $state<api.ClaudeRetention | null>(null);
   let retentionError = $state("");
   let retentionChoice = $state("default");
   let retentionCustom = $state(365);
-  let retentionSaving = $state(false);
 
   function syncChoice(r: api.ClaudeRetention) {
     if (r.days == null) retentionChoice = "default";
@@ -304,50 +346,11 @@
     return `${d} 日`;
   }
 
-  async function saveRetention() {
-    if (chosenDays != null && (!Number.isInteger(chosenDays) || chosenDays < 1 || chosenDays > 36500)) {
-      toast("保存期間は 1〜36500 日にしてください");
-      return;
-    }
-    retentionSaving = true;
-    try {
-      retention = await api.setClaudeRetention(chosenDays);
-      syncChoice(retention);
-      toast(chosenDays == null ? "Claude Code の保存期間を既定に戻しました" : `Claude Code の保存期間を ${chosenDays} 日にしました`);
-    } catch (e) {
-      toast(errorText(e));
-    } finally {
-      retentionSaving = false;
-    }
-  }
-
   // この PC で見つかった端末
   let terminals = $state<api.TerminalChoice[]>([]);
   $effect(() => {
     api.listTerminals().then((t) => (terminals = t)).catch(() => {});
   });
-
-  function setTerminal(id: string) {
-    prefs.terminal = id;
-    savePrefs();
-  }
-
-  function setDensity(d: "normal" | "compact") {
-    prefs.density = d;
-    savePrefs();
-    applyTheme();
-  }
-
-  function setTheme(t: Theme) {
-    prefs.theme = t;
-    savePrefs();
-    applyTheme();
-  }
-
-  function setPref(k: "includeAutomated", v: boolean) {
-    prefs[k] = v;
-    savePrefs();
-  }
 </script>
 
 <div class="wrap">
@@ -355,7 +358,9 @@
     <span class="muted">{dirty ? "保存していない変更があります" : "設定"}</span>
     <span class="spacer"></span>
     <button onclick={revert} disabled={!dirty || saving}>元に戻す</button>
-    <button class="primary" onclick={save} disabled={!dirty || saving}>{saving ? "保存しています…" : "保存して更新"}</button>
+    <button class="primary" onclick={save} disabled={!dirty || saving}>
+      {saving ? "保存しています…" : configDirty || !dirty ? "保存して更新" : "保存"}
+    </button>
   </div>
 
   <div class="tabs" role="tablist">
@@ -710,11 +715,38 @@
     </section>
 
     <section class="panel card">
+      <h2>外部ツール</h2>
+      <p class="note">
+        プロジェクトのフォルダを渡して起動するプログラムです。VS Code / 端末 / フォルダ / Claude のボタンの横に、ここの名前のボタンが並びます
+        (保存してから)。引数の <code>{"{path}"}</code> がフォルダのパスになり、引数が空ならフォルダのパスだけを渡します。
+      </p>
+      {#each draft.externalTools as t, i (t.id)}
+        <div class="account">
+          <div class="grid">
+            <label for="tool-label-{t.id}">名前</label>
+            <div class="inline">
+              <input id="tool-label-{t.id}" type="text" class="grow" placeholder="ボタンに出す名前" bind:value={t.label} />
+              <button class="ghost" onclick={() => draft.externalTools.splice(i, 1)}>削除</button>
+            </div>
+            <label for="tool-command-{t.id}">プログラム</label>
+            <div class="inline">
+              <input id="tool-command-{t.id}" type="text" class="mono grow" placeholder="exe の場所 (PATH にあれば名前だけでもよい)" bind:value={t.command} />
+              <button onclick={() => pickTool(t)}>参照</button>
+            </div>
+            <label for="tool-args-{t.id}">引数</label>
+            <input id="tool-args-{t.id}" type="text" class="mono" placeholder={"空ならフォルダのパスだけ。例: --dir={path}"} bind:value={t.args} />
+          </div>
+        </div>
+      {/each}
+      <button onclick={addTool}>ツールを追加</button>
+    </section>
+
+    <section class="panel card">
       <h2>Claude Code のログの保存期間</h2>
       <p class="note">
         Claude Code は、保存期間 (既定 {retention?.defaultDays ?? 30} 日) より古いセッションのログを起動時に消します。
         消えたセッションは、RepoTether の履歴・グラフ・日報・会話の全文からも消えます。
-        ここで変えると Claude Code の設定ファイルの <code>cleanupPeriodDays</code> だけを書き換え、ほかの設定には触れません。
+        ここで変えて保存すると Claude Code の設定ファイルの <code>cleanupPeriodDays</code> だけを書き換え、ほかの設定には触れません。
         効くのは次に起動する Claude Code からで、すでに消えたログは戻りません。
       </p>
       {#if retentionError}
@@ -736,9 +768,6 @@
           {#if retentionChoice === "custom"}
             <input type="number" min="1" max="36500" bind:value={retentionCustom} aria-label="保存期間 (日)" /> <span class="muted">日</span>
           {/if}
-          <button onclick={saveRetention} disabled={!retentionChanged || retentionSaving}>
-            {retentionSaving ? "書き込んでいます…" : "変更"}
-          </button>
         </div>
         <p class="note mono">{retention.path}</p>
       {:else}
@@ -747,50 +776,44 @@
     </section>
 
     <section class="panel card">
-      <h2>表示 <span class="muted small">(すぐに反映・この PC だけ)</span></h2>
+      <h2>表示 <span class="muted small">(この PC だけ)</span></h2>
       <div class="inline">
         <span class="muted">テーマ</span>
         <div class="segmented" role="group" aria-label="テーマ">
           {#each themes as t (t.id)}
-            <button class:on={prefs.theme === t.id} onclick={() => setTheme(t.id)}>{t.label}</button>
+            <button class:on={prefDraft.theme === t.id} onclick={() => (prefDraft.theme = t.id)}>{t.label}</button>
           {/each}
         </div>
         <label class="field">
           <span class="muted">端末</span>
-          <select value={prefs.terminal} onchange={(e) => setTerminal(e.currentTarget.value)}>
+          <select bind:value={prefDraft.terminal}>
             <option value="">自動 (Windows Terminal、無ければ PowerShell)</option>
             {#each terminals as t (t.id)}<option value={t.id}>{t.label}</option>{/each}
           </select>
         </label>
         <span class="muted">一覧の密度</span>
         <div class="segmented" role="group" aria-label="一覧の密度">
-          <button class:on={prefs.density === "normal"} onclick={() => setDensity("normal")}>標準</button>
-          <button class:on={prefs.density === "compact"} onclick={() => setDensity("compact")}>コンパクト</button>
+          <button class:on={prefDraft.density === "normal"} onclick={() => (prefDraft.density = "normal")}>標準</button>
+          <button class:on={prefDraft.density === "compact"} onclick={() => (prefDraft.density = "compact")}>コンパクト</button>
         </div>
       </div>
       <div class="auto">
         <span class="muted">自動更新</span>
         <label class="field">
           ローカル
-          <select value={prefs.autoLocalMin} onchange={(e) => setAuto("autoLocalMin", Number(e.currentTarget.value))}>
+          <select bind:value={prefDraft.autoLocalMin}>
             {#each [0, 1, 5, 15, 30, 60] as m (m)}<option value={m}>{m ? `${m} 分ごと` : "しない"}</option>{/each}
           </select>
         </label>
         <label class="field">
           リモート
-          <select
-            value={prefs.autoRemoteMin}
-            onchange={(e) => setAuto("autoRemoteMin", Number(e.currentTarget.value))}
-          >
+          <select bind:value={prefDraft.autoRemoteMin}>
             {#each [0, 15, 30, 60, 180] as m (m)}<option value={m}>{m ? `${m} 分ごと` : "しない"}</option>{/each}
           </select>
         </label>
         <label class="field">
           読み直す範囲
-          <select
-            value={prefs.autoActiveDays}
-            onchange={(e) => setAuto("autoActiveDays", Number(e.currentTarget.value))}
-          >
+          <select bind:value={prefDraft.autoActiveDays}>
             {#each [30, 90, 180, 365] as d (d)}<option value={d}>最近 {d} 日に作業したもの</option>{/each}
             <option value={0}>すべて</option>
           </select>
@@ -802,7 +825,7 @@
         (どちらもすべてを読み直します)。
       </p>
       <label class="check">
-        <input type="checkbox" checked={prefs.fetchOnRemote} onchange={(e) => setFetch(e.currentTarget.checked)} />
+        <input type="checkbox" bind:checked={prefDraft.fetchOnRemote} />
         リモートを更新するとき、各リポジトリで <code>git fetch</code> もする
       </label>
       <p class="note">
@@ -815,7 +838,7 @@
       </p>
       <div class="col">
         <label class="check">
-          <input type="checkbox" checked={prefs.includeAutomated} onchange={(e) => setPref("includeAutomated", e.currentTarget.checked)} />
+          <input type="checkbox" bind:checked={prefDraft.includeAutomated} />
           SDK などからの自動実行のセッションも活動に数える
         </label>
       </div>

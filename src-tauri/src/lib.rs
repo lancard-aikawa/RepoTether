@@ -505,6 +505,23 @@ fn open_in(target: String, path: String, terminal: Option<String>) -> Result<(),
     Ok(())
 }
 
+/// 設定の外部ツール (id で選ぶ) を、フォルダを渡して起動する。
+/// 起動するのは設定に保存したプログラムだけ (画面からプログラムの場所は受け取らない)
+#[tauri::command]
+fn open_external(state: State<AppState>, tool: String, path: String) -> Result<(), String> {
+    let dir = existing_dir(&path)?;
+    let t = state
+        .config
+        .lock()
+        .unwrap()
+        .external_tools
+        .iter()
+        .find(|t| t.id == tool)
+        .cloned()
+        .ok_or("設定にない外部ツールです (設定を保存してから使ってください)")?;
+    launch::external(&t.command, &t.args, &dir)
+}
+
 /// git の所有者チェック (dubious ownership) で読めないリポジトリを、
 /// ユーザーのグローバル設定の safe.directory に追加する。
 #[tauri::command]
@@ -580,6 +597,7 @@ pub fn run() {
             refresh,
             clone_repo,
             open_in,
+            open_external,
             trust_repo,
             save_text_with_dialog,
             open_credential_manager,

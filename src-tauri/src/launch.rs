@@ -70,6 +70,62 @@ fn safe_args(args: &[&str]) -> Result<String, String> {
     Ok(args.join(" "))
 }
 
+/// 設定の外部ツールを、フォルダを渡して起動する。シェルは通さず、引数は 1 つずつそのまま渡す
+pub fn external(command: &str, args: &str, dir: &Path) -> Result<(), String> {
+    let command = command.trim();
+    if command.is_empty() {
+        return Err("プログラムの場所が決まっていません".into());
+    }
+    let args = external_args(args, &dir.to_string_lossy());
+    // macOS のアプリ (.app) は実行ファイルではないので open に任せる
+    #[cfg(target_os = "macos")]
+    let mut cmd = if command.trim_end_matches('/').ends_with(".app") {
+        let mut c = Command::new("open");
+        c.arg("-a").arg(command).arg("--args");
+        c
+    } else {
+        Command::new(command)
+    };
+    #[cfg(not(target_os = "macos"))]
+    let mut cmd = Command::new(command);
+    cmd.args(args).current_dir(dir);
+    spawn(&mut cmd).map_err(|e| format!("{command} を起動できません: {e}"))
+}
+
+/// 引数の欄を空白で区切り ("..." の中の空白は区切らない)、{path} をフォルダのパスにする。
+/// {path} が無ければ最後にフォルダのパスを足す。区切ってから置き換えるので、空白のあるパスも 1 つの引数のまま
+fn external_args(template: &str, path: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![];
+    let mut cur = String::new();
+    let mut quoted = false;
+    let mut started = false;
+    for c in template.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    out.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        out.push(cur);
+    }
+    if !template.contains("{path}") {
+        out.push("{path}".into());
+    }
+    out.into_iter().map(|a| a.replace("{path}", path)).collect()
+}
+
 #[cfg(windows)]
 mod windows {
     use super::*;
@@ -348,6 +404,24 @@ mod terminal_tests {
         assert!(ids.contains(&"powershell") && ids.contains(&"cmd"));
         // 決まった種類以外は開かない
         assert!(terminal(std::path::Path::new("C:\\"), "calc").is_err());
+    }
+}
+
+#[cfg(test)]
+mod external_args_tests {
+    use super::*;
+
+    #[test]
+    fn folder_path_stays_one_argument() {
+        let dir = r"C:\My Repos\app";
+        // 引数が空ならフォルダのパスだけ
+        assert_eq!(external_args("", dir), [dir]);
+        // {path} が無ければ最後に足す
+        assert_eq!(external_args("--new-window", dir), ["--new-window", dir]);
+        // {path} の場所に入る。空白のあるパスでも分かれない
+        assert_eq!(external_args("--dir={path} -v", dir), [format!("--dir={dir}"), "-v".to_string()]);
+        // "..." の中の空白は区切らない
+        assert_eq!(external_args(r#"--title "a b" {path}"#, dir), ["--title", "a b", dir]);
     }
 }
 

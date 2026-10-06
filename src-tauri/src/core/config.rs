@@ -36,6 +36,20 @@ pub struct Config {
     /// LockWatch (lock ファイルの脆弱性を調べる CLI) のリポジトリのフォルダ。None なら使わない
     /// (targets.json を書かず、脆弱性のタブも出さない)
     pub lockwatch_path: Option<String>,
+    /// 外部ツール。VS Code / 端末 / フォルダ / Claude のボタンの横に並べ、プロジェクトのフォルダを渡して起動する
+    pub external_tools: Vec<ExternalTool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ExternalTool {
+    pub id: String,
+    /// ボタンに出す名前
+    pub label: String,
+    /// プログラムの場所 (PATH にあれば名前だけでもよい)
+    pub command: String,
+    /// 引数。{path} がフォルダのパスになる。{path} が無ければ最後にフォルダのパスを足す
+    pub args: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -104,6 +118,7 @@ impl Default for Config {
             starred: vec![],
             sessionvault_path: None,
             lockwatch_path: None,
+            external_tools: vec![],
         }
     }
 }

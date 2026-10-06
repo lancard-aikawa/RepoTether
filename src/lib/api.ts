@@ -65,6 +65,7 @@ const mockConfig: Config = {
   starred: [],
   sessionvaultPath: null,
   lockwatchPath: null,
+  externalTools: [],
 };
 
 /** ブラウザ表示の確認用に、外から差し込める値 (tools/manual-shots.mjs がマニュアルの画面を撮るときに使う) */
@@ -148,6 +149,12 @@ export type OpenTarget = "vscode" | "terminal" | "explorer";
 export async function openIn(target: OpenTarget, path: string, terminal = ""): Promise<void> {
   if (!inTauri) throw new Error("ブラウザ表示では開けません");
   return call("open_in", { target, path, terminal });
+}
+
+/** 設定の外部ツール (ExternalTool.id) を、フォルダを渡して起動する */
+export async function openExternal(tool: string, path: string): Promise<void> {
+  if (!inTauri) throw new Error("ブラウザ表示では開けません");
+  return call("open_external", { tool, path });
 }
 
 /** 期間に関係なく、新しい方から skip 件を飛ばして limit 件のコミット (詳細パネルの「次の 10 件」) */

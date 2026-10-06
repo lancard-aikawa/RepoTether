@@ -365,6 +365,8 @@ lock ファイルの無いプロジェクト (package.json だけなど) は調�
 
 「保存して更新」「元に戻す」はタブの外の上部にあり、どのタブからでも押せます。
 保存していない変更があるタブには青い点が付きます。
+設定はどれも、保存を押すまで反映されません (テーマ・端末・自動更新などの表示の設定や、Claude Code のログの保存期間も同じ)。
+表示の設定と保存期間だけを変えたときはボタンが「保存」になり、リポジトリの読み直しはしません。
 
 ### 探す場所
 
@@ -415,7 +417,8 @@ osv-scanner が無いときと、定期実行が登録されていないとき�
 | クローン先の親フォルダ | クローンのダイアログの既定 |
 | Claude のログの場所 | 空なら `%USERPROFILE%\.claude\projects` |
 | SessionVault の場所 | 「ログの検査」で使う SessionVault。**Claude History Viewer のフォルダ**か `sessionvault.exe` を指定する。空なら PATH の sessionvault.exe。Viewer のフォルダなら、Viewer に同梱の SessionVault を Python (3.10 以上) で動かし、Viewer の設定 (`sessionvault_src` / `sessionvault_config`) に合わせて Viewer と同じ保管庫を見る。exe なら、保管庫の場所は exe の隣の `sessionvault.json` に従う |
-| Claude Code のログの保存期間 | Claude Code の `cleanupPeriodDays` (下を参照)。「変更」を押したときだけ書き込む |
+| 外部ツール | プロジェクトのフォルダを渡して起動するプログラム (いくつでも)。名前・プログラムの場所・引数を入れて保存すると、VS Code / 端末 / フォルダ / Claude のボタンの横に、その名前のボタンが並ぶ。引数の `{path}` がフォルダのパスになり、引数が空ならフォルダのパスだけを渡す (例: fastmd-explorer は `fastmd-explorer.exe` を指定するだけ)。シェルは通さず、作業フォルダはそのプロジェクトのフォルダ |
+| Claude Code のログの保存期間 | Claude Code の `cleanupPeriodDays` (下を参照)。保存したときに書き込む |
 | テーマ | OS に合わせる / ライト / ダーク (タイトルバーも合わせる) |
 | 一覧の密度 | 標準 / コンパクト (行を詰め、Claude の一行要約を省く) |
 | 端末 | 「端末」ボタンで開くもの。この PC で見つかったもの (Windows Terminal / PowerShell 7 / Windows PowerShell / コマンドプロンプト / Git Bash / WSL) から選ぶ |
@@ -424,7 +427,7 @@ osv-scanner が無いときと、定期実行が登録されていないとき�
 | git fetch | リモートを更新するとき、各リポジトリで `git fetch --all --prune` もする (既定はしない)。認証の画面は出さず、1 つ 20 秒で打ち切る |
 | 自動実行のセッション | SDK などからの自動実行のセッションも活動に数えるか |
 
-表示の設定はこの PC だけのもので、すぐに反映されます。
+表示の設定 (テーマから下) はこの PC だけのものです。ほかの設定と同じく、保存を押すと反映されます。
 
 **Claude Code のログの保存期間** — Claude Code は、保存期間 (既定 30 日) より古いセッションのログを起動時に消します。
 消えたセッションは RepoTether の履歴・グラフ・日報・会話の全文からも消えるので、長く残したいなら延ばしてください
