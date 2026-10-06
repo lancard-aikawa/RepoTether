@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Project } from "$lib/derive";
-  import type { Commit, SessionFinding } from "$lib/types";
+  import type { Commit, Link, SessionFinding } from "$lib/types";
   import { formatDateTime, formatTime, relative, toMs, dayKey, formatDayLabel } from "$lib/format";
   import * as api from "$lib/api";
   import {
@@ -13,6 +13,7 @@
     refresh,
     savePrefs,
     setHidden,
+    setLinks,
     setTags,
     toast,
     openTranscript,
@@ -20,6 +21,7 @@
     scanVulns,
     type DetailTab,
   } from "$lib/store.svelte";
+  import { hostOf, normalizeUrl, titleCandidate } from "$lib/links";
   import * as vulnsLib from "$lib/vulns";
   import ProjectActions from "./ProjectActions.svelte";
   import ReadmeView from "./ReadmeView.svelte";
@@ -66,6 +68,112 @@
         project.prefKey,
         project.tags.filter((x) => x !== t),
       );
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  // ---- 関連ページ (サービスの管理画面など) ----
+  const links = $derived(app.config?.links?.[project.prefKey] ?? []);
+  let linkUrl = $state("");
+  let linkTitle = $state("");
+  let linkFetching = $state(false);
+  let linkError = $state("");
+
+  /** URL が入ったら、名前が空のあいだだけページのタイトルを取って候補にする (取れなければホスト名) */
+  async function suggestTitle() {
+    const url = normalizeUrl(linkUrl);
+    if (!url || linkTitle.trim() || linkFetching) return;
+    linkFetching = true;
+    let fetched = "";
+    try {
+      fetched = await api.pageTitle(url);
+    } catch {
+      // 取れなければホスト名を候補にする
+    } finally {
+      linkFetching = false;
+    }
+    // 取っているあいだに URL や名前を変えていたら、上書きしない
+    if (normalizeUrl(linkUrl) === url && !linkTitle.trim()) linkTitle = titleCandidate(fetched, url);
+  }
+
+  async function addLink() {
+    const url = normalizeUrl(linkUrl);
+    if (!url) {
+      linkError = "http:// か https:// の URL を入れてください";
+      return;
+    }
+    if (links.some((l) => l.url === url)) {
+      linkError = "この URL はもう登録してあります";
+      return;
+    }
+    try {
+      await setLinks(project.prefKey, [...links, { title: linkTitle.trim() || hostOf(url), url }]);
+      linkUrl = "";
+      linkTitle = "";
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  async function removeLink(url: string) {
+    try {
+      await setLinks(
+        project.prefKey,
+        links.filter((l) => l.url !== url),
+      );
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  // 編集中の下書き (名前・URL・並び順)。null なら編集していない
+  let linkEdit = $state<Link[] | null>(null);
+
+  // 別のプロジェクトを選んだら、編集はやめる
+  $effect(() => {
+    void project.prefKey;
+    linkEdit = null;
+    linkError = "";
+  });
+
+  function startLinkEdit() {
+    linkError = "";
+    linkEdit = links.map((l) => ({ ...l }));
+  }
+
+  function moveLink(i: number, d: -1 | 1) {
+    if (!linkEdit || !linkEdit[i + d]) return;
+    [linkEdit[i], linkEdit[i + d]] = [linkEdit[i + d], linkEdit[i]];
+  }
+
+  async function saveLinkEdit() {
+    if (!linkEdit) return;
+    const next: Link[] = [];
+    for (const l of linkEdit) {
+      const url = normalizeUrl(l.url);
+      if (!url) {
+        linkError = `URL として読めません: ${l.url || "(空)"}`;
+        return;
+      }
+      if (next.some((x) => x.url === url)) {
+        linkError = `同じ URL が 2 つあります: ${url}`;
+        return;
+      }
+      next.push({ title: l.title.trim() || hostOf(url), url });
+    }
+    try {
+      await setLinks(project.prefKey, next);
+      linkEdit = null;
+      linkError = "";
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
+  async function openLink(url: string) {
+    try {
+      await api.openUrl(url);
     } catch (e) {
       toast(errorText(e));
     }
@@ -394,6 +502,73 @@
         </datalist>
       </div>
       {#if tagError}<p class="small err">{tagError}</p>{/if}
+    </section>
+
+    <section>
+      <h3>
+        関連ページ
+        {#if linkEdit}
+          <button class="small-btn primary" onclick={saveLinkEdit}>保存</button>
+          <button class="small-btn" onclick={() => ((linkEdit = null), (linkError = ""))}>やめる</button>
+        {:else if links.length}
+          <button class="small-btn" onclick={startLinkEdit} title="名前・URL・並び順を変える">編集</button>
+        {/if}
+      </h3>
+      {#if linkEdit}
+        <ul class="plain link-edit">
+          {#each linkEdit as l, i}
+            <li>
+              <div class="fields">
+                <input type="text" placeholder="名前 (空ならホスト名)" aria-label="名前" bind:value={l.title} />
+                <input type="text" class="mono" placeholder="URL" aria-label="URL" bind:value={l.url} oninput={() => (linkError = "")} />
+              </div>
+              <button onclick={() => moveLink(i, -1)} disabled={i === 0} title="上へ" aria-label="上へ">↑</button>
+              <button onclick={() => moveLink(i, 1)} disabled={i === linkEdit!.length - 1} title="下へ" aria-label="下へ">↓</button>
+              <button onclick={() => linkEdit!.splice(i, 1)} title="外す (保存で反映)">外す</button>
+            </li>
+          {/each}
+        </ul>
+        {#if linkError}<p class="small err">{linkError}</p>{/if}
+      {:else}
+      {#if links.length}
+        <ul class="plain links">
+          {#each links as l (l.url)}
+            <li>
+              <button class="page" onclick={() => openLink(l.url)} title="{l.url} をブラウザで開く">
+                {#await api.linkIcon(l.url)}
+                  <span class="favicon"></span>
+                {:then src}
+                  {#if src}<img class="favicon" {src} alt="" />{:else}<span class="favicon none"></span>{/if}
+                {/await}
+                <span class="page-title">{l.title}</span>
+                <span class="muted small">{hostOf(l.url)}</span>
+              </button>
+              <button class="x" onclick={() => removeLink(l.url)} title="外す" aria-label="関連ページ {l.title} を外す">×</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <div class="link-add">
+        <input
+          type="text"
+          class="mono"
+          placeholder="URL (管理画面・ドキュメントなど)"
+          bind:value={linkUrl}
+          oninput={() => (linkError = "")}
+          onchange={suggestTitle}
+          onpaste={() => setTimeout(suggestTitle)}
+          onkeydown={(e) => e.key === "Enter" && !e.isComposing && (linkTitle.trim() ? addLink() : suggestTitle())}
+        />
+        <input
+          type="text"
+          placeholder={linkFetching ? "タイトルを取っています…" : "名前 (空ならホスト名)"}
+          bind:value={linkTitle}
+          onkeydown={(e) => e.key === "Enter" && !e.isComposing && addLink()}
+        />
+        <button onclick={addLink} disabled={!linkUrl.trim() || linkFetching}>追加</button>
+      </div>
+      {#if linkError}<p class="small err">{linkError}</p>{/if}
+      {/if}
     </section>
 
     {#if project.leftovers.length}
@@ -971,6 +1146,84 @@
   .tag-add {
     display: flex;
     gap: 6px;
+  }
+
+  .links {
+    margin-bottom: 6px;
+  }
+
+  .links li {
+    flex-wrap: nowrap;
+    align-items: stretch;
+  }
+
+  /* 押せば開くと分かるように、行ごとに枠のあるボタンにする */
+  .links .page {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-align: left;
+  }
+
+  .page-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .links .page .small {
+    margin-left: auto;
+    flex: none;
+  }
+
+  .favicon {
+    width: 16px;
+    height: 16px;
+    flex: none;
+    object-fit: contain;
+  }
+
+  /* アイコンが無いサイトは、同じ大きさの丸で場所をそろえる */
+  .favicon.none {
+    border-radius: 50%;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    box-sizing: border-box;
+  }
+
+  .links .x {
+    padding: 0 8px;
+    color: var(--ink-2);
+  }
+
+  .link-edit li {
+    flex-wrap: nowrap;
+    align-items: center;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .link-edit .fields {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .link-edit button {
+    padding: 2px 8px;
+  }
+
+  .link-add {
+    display: flex;
+    gap: 6px;
+  }
+
+  .link-add input {
+    flex: 1;
+    min-width: 0;
   }
 
   .tag-add input {

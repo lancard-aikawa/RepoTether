@@ -8,6 +8,7 @@ pub mod git;
 pub mod icon;
 pub mod lockwatch;
 pub mod model;
+pub mod pagetitle;
 pub mod remote;
 pub mod secrets;
 pub mod sessions;

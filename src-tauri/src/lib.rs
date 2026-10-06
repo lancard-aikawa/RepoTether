@@ -505,6 +505,20 @@ fn open_in(target: String, path: String, terminal: Option<String>) -> Result<(),
     Ok(())
 }
 
+/// Web ページのタイトル。関連ページを登録するときの名前の候補にする (title が無ければ空文字)
+#[tauri::command]
+async fn page_title(url: String) -> Result<String, String> {
+    core::pagetitle::fetch(&url).await
+}
+
+/// 関連ページのサイトのアイコン (favicon) の中身。無ければ空。一度取ったものはキャッシュのフォルダに残す。
+/// 画像の種類は画面の側で中身から見分ける
+#[tauri::command]
+async fn page_icon(app: AppHandle, url: String) -> tauri::ipc::Response {
+    let dir = app.state::<AppState>().cache_dir.join("favicons");
+    tauri::ipc::Response::new(core::pagetitle::icon(&url, &dir).await)
+}
+
 /// 設定の外部ツール (id で選ぶ) を、フォルダを渡して起動する。
 /// 起動するのは設定に保存したプログラムだけ (画面からプログラムの場所は受け取らない)
 #[tauri::command]
@@ -598,6 +612,8 @@ pub fn run() {
             clone_repo,
             open_in,
             open_external,
+            page_title,
+            page_icon,
             trust_repo,
             save_text_with_dialog,
             open_credential_manager,

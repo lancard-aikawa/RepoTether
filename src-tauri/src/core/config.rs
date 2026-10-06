@@ -38,6 +38,15 @@ pub struct Config {
     pub lockwatch_path: Option<String>,
     /// 外部ツール。VS Code / 端末 / フォルダ / Claude のボタンの横に並べ、プロジェクトのフォルダを渡して起動する
     pub external_tools: Vec<ExternalTool>,
+    /// プロジェクトの関連ページ (サービスの管理画面など)。キーは hidden と同じ
+    pub links: BTreeMap<String, Vec<Link>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Link {
+    pub title: String,
+    pub url: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -119,6 +128,7 @@ impl Default for Config {
             sessionvault_path: None,
             lockwatch_path: None,
             external_tools: vec![],
+            links: BTreeMap::new(),
         }
     }
 }

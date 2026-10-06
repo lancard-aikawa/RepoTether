@@ -66,6 +66,7 @@ const mockConfig: Config = {
   sessionvaultPath: null,
   lockwatchPath: null,
   externalTools: [],
+  links: {},
 };
 
 /** ブラウザ表示の確認用に、外から差し込める値 (tools/manual-shots.mjs がマニュアルの画面を撮るときに使う) */
@@ -155,6 +156,12 @@ export async function openIn(target: OpenTarget, path: string, terminal = ""): P
 export async function openExternal(tool: string, path: string): Promise<void> {
   if (!inTauri) throw new Error("ブラウザ表示では開けません");
   return call("open_external", { tool, path });
+}
+
+/** Web ページのタイトル (関連ページの名前の候補)。title が無ければ空文字 */
+export async function pageTitle(url: string): Promise<string> {
+  if (!inTauri) throw new Error("ブラウザ表示では取れません");
+  return call("page_title", { url });
 }
 
 /** 期間に関係なく、新しい方から skip 件を飛ばして limit 件のコミット (詳細パネルの「次の 10 件」) */
@@ -423,6 +430,32 @@ async function loadIcon(path: string): Promise<string | null> {
   const bytes = new Uint8Array(buf);
   const type = bytes.length ? imageType(bytes) : null;
   return type ? URL.createObjectURL(new Blob([bytes], { type })) : null;
+}
+
+const linkIconCache = new Map<string, Promise<string | null>>();
+
+/**
+ * 関連ページのサイトのアイコン (favicon。表示用の URL)。無ければ null。
+ * サイト (origin) ごとに、アプリを閉じるまで覚えておく
+ */
+export function linkIcon(url: string): Promise<string | null> {
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return Promise.resolve(null);
+  }
+  let p = linkIconCache.get(origin);
+  if (!p) {
+    p = (async () => {
+      if (!inTauri) return null;
+      const bytes = new Uint8Array(await call<ArrayBuffer>("page_icon", { url }));
+      const type = bytes.length ? imageType(bytes) : null;
+      return type ? URL.createObjectURL(new Blob([bytes], { type })) : null;
+    })().catch(() => null);
+    linkIconCache.set(origin, p);
+  }
+  return p;
 }
 
 /** フォルダ選択ダイアログ。キャンセルなら null */

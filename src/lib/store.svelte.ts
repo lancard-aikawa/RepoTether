@@ -1,7 +1,7 @@
 // アプリ全体の状態。設定・取り込み結果・更新中の表示。
 
 import * as api from "./api";
-import type { Config, LockwatchStatus, Session, Snapshot, VulnReport } from "./types";
+import type { Config, Link, LockwatchStatus, Session, Snapshot, VulnReport } from "./types";
 import * as tags_ from "./tags";
 
 export const app = $state({
@@ -333,6 +333,15 @@ export const placeTag = (tag: string, target: string, pos: tags_.Placement) =>
 /** 存在するタグすべて (自分で並べた順) */
 export function allTags(): string[] {
   return app.config ? tags_.definedTags(app.config) : [];
+}
+
+/** プロジェクトの関連ページを置き換える (空にしたらキーごと消す) */
+export async function setLinks(key: string, links: Link[]) {
+  if (!app.config) return;
+  const all = { ...(app.config.links ?? {}) };
+  if (links.length) all[key] = links;
+  else delete all[key];
+  await updateConfig({ ...app.config, links: all });
 }
 
 /** スター (お気に入り) を付ける / 外す */

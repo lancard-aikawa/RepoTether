@@ -146,6 +146,13 @@ export interface Config {
   lockwatchPath: string | null;
   /** 外部ツール。VS Code などのボタンの横に並べ、プロジェクトのフォルダを渡して起動する */
   externalTools: ExternalTool[];
+  /** プロジェクトの設定キー (Project.prefKey) -> 関連ページ (サービスの管理画面など) */
+  links: Record<string, Link[]>;
+}
+
+export interface Link {
+  title: string;
+  url: string;
 }
 
 export interface ExternalTool {
