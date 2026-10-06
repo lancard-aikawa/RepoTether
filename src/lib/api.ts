@@ -82,6 +82,8 @@ type MockHooks = {
   __mockLockwatchStatus?: LockwatchStatus;
   /** パス → アイコンの URL (data: など) */
   __mockIcons?: Record<string, string>;
+  /** サイト (origin) → 関連ページのアイコンの URL */
+  __mockLinkIcons?: Record<string, string>;
 };
 const hooks = () => (typeof window === "undefined" ? {} : (window as unknown as MockHooks));
 
@@ -448,7 +450,7 @@ export function linkIcon(url: string): Promise<string | null> {
   let p = linkIconCache.get(origin);
   if (!p) {
     p = (async () => {
-      if (!inTauri) return null;
+      if (!inTauri) return hooks().__mockLinkIcons?.[origin] ?? null;
       const bytes = new Uint8Array(await call<ArrayBuffer>("page_icon", { url }));
       const type = bytes.length ? imageType(bytes) : null;
       return type ? URL.createObjectURL(new Blob([bytes], { type })) : null;

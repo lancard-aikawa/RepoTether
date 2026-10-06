@@ -207,6 +207,19 @@ const ICONS = {
   ),
 };
 
+// 関連ページの見本 (invoice-api)。架空のサービスなので、アイコンもここで作る (1 つはアイコンなし)
+const LINKS = {
+  "C:\\Repos\\work\\invoice-api": [
+    { title: "メール送信の管理画面", url: "https://mail.example.com/emails" },
+    { title: "DNS とドメイン", url: "https://dash.example.net/acme/dns" },
+    { title: "請求 API の仕様書", url: "https://docs.example.org/invoice-api" },
+  ],
+};
+const LINK_ICONS = {
+  "https://mail.example.com": svgIcon("#1f1f1f", `<path d="M14 22h36v22H14z M14 23l18 13 18-13" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>`),
+  "https://dash.example.net": svgIcon("#e0822a", `<path d="M16 42a9 9 0 0 1 3-17 13 13 0 0 1 25 2 8 8 0 0 1 2 15z" fill="#fff"/>`),
+};
+
 // 会話の全文の見本 (photo-organizer の直前のセッション)
 const TRANSCRIPT = [
   { role: "user", text: "EXIF の撮影日で年月フォルダに振り分けたい" },
@@ -426,6 +439,8 @@ function buildConfig() {
     tags,
     tagDefs: ["仕事", "仕事/ACME", "仕事/社内", "自作", "自作/アプリ", "自作/ツール", "自作/サイト", "自作/設定"],
     starred,
+    externalTools: [{ id: "tool1", label: "MdExplorer", command: "C:\\Tools\\fastmd-explorer.exe", args: "" }],
+    links: Object.fromEntries(Object.entries(LINKS).map(([p, v]) => [key(p), v])),
   };
 }
 
@@ -477,8 +492,16 @@ async function main() {
       page.setDefaultTimeout(8000);
       await page.route("**/dev-snapshot.json", (route) => route.fulfill({ json: snapshot }));
       await page.addInitScript(
-        ({ config, readme, prefs, transcript, icons }) => {
+        ({ config, readme, prefs, transcript, icons, linkIcons }) => {
           window.__mockConfig = config;
+          window.__mockLinkIcons = linkIcons;
+          // マニュアルには「ブラウザ表示」の印を出さない。開発サーバーが起動直後にページを読み込み直しても
+          // 消えないよう、読み込みのたびに入れる
+          document.addEventListener("DOMContentLoaded", () => {
+            const style = document.createElement("style");
+            style.textContent = ".status .badge.info { display: none !important; }";
+            document.head.append(style);
+          });
           window.__mockGhUser = "demo-user";
           window.__mockTranscript = transcript;
           window.__mockReadme = readme;
@@ -492,13 +515,12 @@ async function main() {
           config,
           readme: README,
           icons: ICONS,
+          linkIcons: LINK_ICONS,
           prefs,
           transcript: TRANSCRIPT.map((e, i) => ({ at: transcriptTimes[i], tools: [], ...e })),
         },
       );
       await page.goto(URL_BASE);
-      // マニュアルには「ブラウザ表示」の印を出さない
-      await page.addStyleTag({ content: ".status .badge.info { display: none !important; }" });
       await page.waitForSelector(".list li, .explorer tbody tr, .tiles, textarea, .scroll");
       await page.waitForTimeout(600);
       return page;
