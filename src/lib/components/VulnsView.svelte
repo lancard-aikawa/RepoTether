@@ -33,7 +33,7 @@
       const v = p.local ? by[p.local.id] : undefined;
       if (!v) continue;
       const res = v.result;
-      const findings = vulnsLib.visible(res?.findings ?? [], prefs.vulnHide);
+      const findings = vulnsLib.visible(vulnsLib.findingsOf(app.vulns, p.local?.id), prefs.vulnHide);
       out.push({
         project: p,
         status: res?.status ?? "none",
@@ -60,9 +60,7 @@
   let showAll = $state(false);
   const shown = $derived(showAll ? rows : flagged);
 
-  const rawFindings = $derived(
-    projects.flatMap((p) => (p.local ? (app.vulns?.byRepo[p.local.id]?.result?.findings ?? []) : [])),
-  );
+  const rawFindings = $derived(projects.flatMap((p) => vulnsLib.findingsOf(app.vulns, p.local?.id)));
   const totals = $derived(vulnsLib.counts(rows.flatMap((r) => r.findings)));
   const hideChoices = $derived(vulnsLib.hideChoices(rawFindings));
   const hiddenCount = $derived(rawFindings.length - rows.reduce((n, r) => n + r.findings.length, 0));

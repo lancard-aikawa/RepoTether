@@ -73,3 +73,21 @@ test("注意の文は LockWatch の表示と同じ。知らない種類もその
   assert.equal(v.noticeLabel("recent"), "公開直後の版");
   assert.equal(v.noticeLabel("future"), "future");
 });
+
+test("findingsOf / heavyOf は、結果が無い・対象でない・まだ照合していないリポジトリを 0 件として扱う", () => {
+  const repo = (findings: any[] | null): any => ({
+    targetId: "x",
+    visibility: "private",
+    result: findings && { status: "ok", mode: "offline", scannedAt: null, lockfiles: [], findings, notices: [], error: null },
+    new: [],
+  });
+  const report: any = { configured: true, error: null, byRepo: { a: repo(sample), pending: repo(null) } };
+  assert.equal(v.findingsOf(report, "a").length, sample.length);
+  assert.equal(v.heavyOf(report, "a", []), 2);
+  assert.equal(v.heavyOf(report, "a", ["high"]), 1);
+  // まだ照合していない・一覧に無い・手元に無い (id が無い)・結果そのものが無い
+  assert.equal(v.heavyOf(report, "pending", []), 0);
+  assert.equal(v.heavyOf(report, "missing", []), 0);
+  assert.equal(v.heavyOf(report, undefined, []), 0);
+  assert.deepEqual(v.findingsOf(null, "a"), []);
+});

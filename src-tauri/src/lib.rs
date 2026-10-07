@@ -19,6 +19,8 @@ struct AppState {
     refreshing: AtomicBool,
     /// pull しているリポジトリ (path_key)。このあいだは読み直しを始めない (同じリポジトリを同時に触らないように)
     pulling: Mutex<std::collections::HashSet<String>>,
+    /// 画面に渡した取り込み結果にあるリポジトリ (path_key)。pull してよい場所かを、ファイルを読み直さずに確かめる
+    known_repos: Mutex<std::collections::HashSet<String>>,
     /// LockWatch のデータの場所。Python を起動して聞くので、設定の「LockWatch の場所」ごとに覚えておく
     lockwatch_locations: Mutex<Option<(String, core::lockwatch::Locations)>>,
 }
@@ -26,6 +28,11 @@ struct AppState {
 impl AppState {
     fn snapshot_path(&self) -> PathBuf {
         self.cache_dir.join("snapshot.json")
+    }
+
+    /// 画面に渡す取り込み結果のリポジトリを覚える
+    fn remember_repos(&self, snap: &Snapshot) {
+        *self.known_repos.lock().unwrap() = snap.repos.iter().map(|r| util::path_key(&r.path)).collect();
     }
 
     /// LockWatch の呼び方と場所。設定で決めていなければ None
@@ -401,7 +408,11 @@ fn open_credential_manager() -> Result<(), String> {
 
 #[tauri::command]
 fn load_snapshot(state: State<AppState>) -> Option<Snapshot> {
-    core::load_snapshot(&state.snapshot_path())
+    let snap = core::load_snapshot(&state.snapshot_path());
+    if let Some(s) = &snap {
+        state.remember_repos(s);
+    }
+    snap
 }
 
 /// ローカルを読み直す。include_remote ならリモート一覧も取り直し、そうでなければ前回分を引き継ぐ。
@@ -477,6 +488,7 @@ async fn refresh_inner(
         snap.errors.push(core::model::SourceError { source: "lockwatch".into(), message: format!("LockWatch: {e}") });
     }
     core::save_snapshot(&snapshot_path, &snap)?;
+    state.remember_repos(&snap);
     Ok(snap)
 }
 
@@ -491,7 +503,7 @@ async fn clone_repo(url: String, dest: String) -> Result<String, String> {
 }
 
 /// path のリポジトリで `git pull --ff-only` をする (早送りだけ)。
-/// 動かせるのは、前回の取り込み結果にあるリポジトリだけ。読み直しの最中は断る (同じリポジトリを同時に触らないように)
+/// 動かせるのは、画面に渡した取り込み結果にあるリポジトリだけ。読み直しの最中は断る (同じリポジトリを同時に触らないように)
 #[tauri::command]
 async fn pull_repo(app: AppHandle, path: String) -> Result<core::git::PullResult, String> {
     let state = app.state::<AppState>();
@@ -502,19 +514,13 @@ async fn pull_repo(app: AppHandle, path: String) -> Result<core::git::PullResult
     }
     let result = if state.refreshing.load(Ordering::SeqCst) {
         Err("更新中です。終わってからやり直してください".to_string())
+    } else if !state.known_repos.lock().unwrap().contains(&key) {
+        Err(format!("{path} は一覧にあるリポジトリではありません"))
     } else {
-        let snapshot_path = state.snapshot_path();
-        let key = key.clone();
-        tauri::async_runtime::spawn_blocking(move || {
-            let known = core::load_snapshot(&snapshot_path).is_some_and(|s| s.repos.iter().any(|r| util::path_key(&r.path) == key));
-            if !known {
-                return Err(format!("{path} は一覧にあるリポジトリではありません"));
-            }
-            core::git::pull(Path::new(&path))
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .and_then(|r| r)
+        tauri::async_runtime::spawn_blocking(move || core::git::pull(Path::new(&path)))
+            .await
+            .map_err(|e| e.to_string())
+            .and_then(|r| r)
     };
     state.pulling.lock().unwrap().remove(&key);
     result
@@ -636,6 +642,7 @@ pub fn run() {
                 cache_dir,
                 refreshing: AtomicBool::new(false),
                 pulling: Mutex::new(Default::default()),
+                known_repos: Mutex::new(Default::default()),
                 lockwatch_locations: Mutex::new(None),
             });
             Ok(())

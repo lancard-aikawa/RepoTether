@@ -2,7 +2,7 @@
   import type { Project } from "$lib/derive";
   import { relative } from "$lib/format";
   import { app, errorText, prefs, setHidden, toast } from "$lib/store.svelte";
-  import { heavyCount } from "$lib/vulns";
+  import { heavyOf } from "$lib/vulns";
   import ProjectActions from "./ProjectActions.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
   import RepoIcon from "./RepoIcon.svelte";
@@ -47,9 +47,7 @@
   }
 
   /** 重い脆弱性 (緊急・高) の数。詳細パネルの「隠す」で隠したものは数えない */
-  const heavy = $derived(
-    p.local ? heavyCount(app.vulns?.byRepo[p.local.id]?.result?.findings ?? [], prefs.vulnHide) : 0,
-  );
+  const heavy = $derived(heavyOf(app.vulns, p.local?.id, prefs.vulnHide));
 
   async function toggleHidden() {
     try {

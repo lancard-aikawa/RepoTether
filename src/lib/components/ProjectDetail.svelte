@@ -242,7 +242,7 @@
 
   // ---- 脆弱性 (LockWatch の結果) ----
   const vulns = $derived(project.local ? app.vulns?.byRepo[project.local.id] ?? null : null);
-  const vulnAll = $derived(vulns?.result?.findings ?? []);
+  const vulnAll = $derived(vulnsLib.findingsOf(app.vulns, project.local?.id));
   const vulnFindings = $derived(vulnsLib.visible(vulnAll, prefs.vulnHide));
   const vulnHiddenCount = $derived(vulnAll.length - vulnFindings.length);
   const vulnChoices = $derived(vulnsLib.hideChoices(vulnAll));

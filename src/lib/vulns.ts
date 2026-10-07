@@ -2,7 +2,7 @@
 //
 // 「隠す」は、深刻度 (low など) か知らせの種類 (unmaintained など) を選ぶ。LockWatch の report --hide と同じ考え方
 
-import type { VulnFinding, VulnNotice, VulnSeverity } from "./types";
+import type { VulnFinding, VulnNotice, VulnReport, VulnSeverity } from "./types";
 
 export const SEVERITIES: VulnSeverity[] = ["critical", "high", "medium", "low", "unknown"];
 /** RustSec の知らせの種類 (脆弱性ではないもの) */
@@ -59,6 +59,16 @@ export function counts(findings: readonly VulnFinding[]): [VulnSeverity, number]
 /** 一覧の行に印を出す数: 隠すものを除いた critical と high */
 export function heavyCount(findings: readonly VulnFinding[], hide: readonly string[]): number {
   return findings.filter((f) => !isHidden(f, hide) && (f.severity === "critical" || f.severity === "high")).length;
+}
+
+/** そのリポジトリの脆弱性 (隠す前のすべて)。手元に無い・対象でない・まだ照合していないなら空。repoId は LocalRepo.id */
+export function findingsOf(report: VulnReport | null | undefined, repoId: string | null | undefined): VulnFinding[] {
+  return (repoId != null ? report?.byRepo[repoId]?.result?.findings : undefined) ?? [];
+}
+
+/** そのリポジトリの印の数 (一覧の行・マス・上部のタブで同じ数になるように、ここだけで数える) */
+export function heavyOf(report: VulnReport | null | undefined, repoId: string | null | undefined, hide: readonly string[]): number {
+  return heavyCount(findingsOf(report, repoId), hide);
 }
 
 /** その結果に出てくる「隠す」の選択肢 (深刻度 → 知らせの種類の順) */

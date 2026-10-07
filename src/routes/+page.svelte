@@ -10,7 +10,7 @@
   import ReportView from "$lib/components/ReportView.svelte";
   import SettingsView from "$lib/components/SettingsView.svelte";
   import VulnsView from "$lib/components/VulnsView.svelte";
-  import { heavyCount } from "$lib/vulns";
+  import { heavyOf } from "$lib/vulns";
   import SessionTranscript from "$lib/components/SessionTranscript.svelte";
 
   const tabs: { id: Tab; label: string }[] = [
@@ -31,12 +31,7 @@
   const visible = $derived(projects.filter((p) => !p.hidden));
 
   /** 脆弱性タブに出す数: 緊急・高の合計 (「隠す」で隠したものは数えない) */
-  const heavyTotal = $derived(
-    visible.reduce(
-      (n, p) => n + (p.local ? heavyCount(app.vulns?.byRepo[p.local.id]?.result?.findings ?? [], prefs.vulnHide) : 0),
-      0,
-    ),
-  );
+  const heavyTotal = $derived(visible.reduce((n, p) => n + heavyOf(app.vulns, p.local?.id, prefs.vulnHide), 0));
 
   // 相対時刻の表示を 1 分ごとに進める
   let now = $state(Date.now());

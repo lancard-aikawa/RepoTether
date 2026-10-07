@@ -4,7 +4,7 @@
   import type { Project } from "$lib/derive";
   import { relative } from "$lib/format";
   import { app, prefs } from "$lib/store.svelte";
-  import { heavyCount } from "$lib/vulns";
+  import { heavyOf } from "$lib/vulns";
   import RepoIcon from "./RepoIcon.svelte";
   import StarButton from "./StarButton.svelte";
 
@@ -26,9 +26,7 @@
   } = $props();
 
   /** 重い脆弱性 (緊急・高) の数。「隠す」で隠したものは数えない */
-  const heavy = $derived(
-    p.local ? heavyCount(app.vulns?.byRepo[p.local.id]?.result?.findings ?? [], prefs.vulnHide) : 0,
-  );
+  const heavy = $derived(heavyOf(app.vulns, p.local?.id, prefs.vulnHide));
 
   /** カーソルを乗せたときの説明: 場所・ブランチ・タグ */
   const tip = $derived(
