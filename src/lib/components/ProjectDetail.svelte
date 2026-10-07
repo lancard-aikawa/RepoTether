@@ -17,6 +17,7 @@
     setTags,
     toast,
     openTranscript,
+    pullRepo,
     resumeSession,
     scanVulns,
     type DetailTab,
@@ -208,6 +209,37 @@
     return () => (cancelled = true);
   });
 
+  // ---- リポジトリタブ: 未コミットの変更と pull ----
+  // pull の最中かどうかと結果はストアにある (パネルを閉じても、別のプロジェクトへ切り替えても失わないように)
+  const pulling = $derived(!!r && app.pulling === r.path);
+  const pullResult = $derived(r && app.pullResult?.path === r.path ? app.pullResult : null);
+  let rereading = $state(false);
+
+  /** pull できない理由。できるなら空 */
+  const pullBlocked = $derived(
+    !r || r.error
+      ? ""
+      : !r.branch
+        ? "ブランチにいない (detached HEAD) ので、pull できません。"
+        : !r.upstream
+          ? "追跡先のブランチが無いので、pull できません。"
+          : r.conflicted
+            ? "競合を解決している途中なので、pull できません。"
+            : r.ahead > 0 && r.behind > 0
+              ? `ローカルとリモートが分岐している (未 push ${r.ahead} / 未取り込み ${r.behind}) ので、早送りできません。端末で rebase か merge をしてください。`
+              : "",
+  );
+  const dirtyCount = $derived(r ? r.staged + r.modified + r.untracked + r.conflicted : 0);
+
+  /** このリポジトリだけを git から読み直す */
+  async function rereadRepo() {
+    if (!r) return;
+    rereading = true;
+    await refresh(false, { kind: "under", path: r.path });
+    rereading = false;
+  }
+
+
   // ---- 脆弱性 (LockWatch の結果) ----
   const vulns = $derived(project.local ? app.vulns?.byRepo[project.local.id] ?? null : null);
   const vulnAll = $derived(vulns?.result?.findings ?? []);
@@ -226,10 +258,9 @@
     unchangedSince = null;
   });
 
-  /** 設定の「脆弱性」タブを開く (osv-scanner が無い・定期実行が未登録のときの案内から) */
+  /** 上の「脆弱性」タブを開く (osv-scanner が無い・定期実行が未登録のときの案内から) */
   function openLockwatchSettings() {
-    prefs.settingsTab = "vulns";
-    prefs.tab = "settings";
+    prefs.tab = "vulns";
     savePrefs();
   }
 
@@ -606,6 +637,58 @@
     {#if tab === "git"}
     {#if r && !r.error}
       <section>
+        <h3>
+          未コミットの変更
+          <button class="small-btn" onclick={rereadRepo} disabled={app.busy || !!app.pulling} title="このリポジトリの状態を git から読み直す">
+            {rereading ? "読み直しています…" : "読み直す"}
+          </button>
+        </h3>
+        <p class="wt">
+          {#if dirtyCount === 0}
+            <span class="badge good">ありません</span>
+          {:else}
+            {#if r.conflicted}<span class="badge high">競合 {r.conflicted}</span>{/if}
+            {#if r.staged}<span class="badge mid">ステージ済み {r.staged}</span>{/if}
+            {#if r.modified}<span class="badge mid">変更 {r.modified}</span>{/if}
+            {#if r.untracked}<span class="badge low">未追跡 {r.untracked}</span>{/if}
+            {#if r.dirtyModifiedAt}<span class="muted small">最後の変更 {when(r.dirtyModifiedAt)}</span>{/if}
+          {/if}
+          {#if r.stashes}<span class="badge low">stash {r.stashes}</span>{/if}
+        </p>
+      </section>
+
+      <section>
+        <h3>
+          取り込み (pull)
+          <button
+            class="small-btn"
+            class:primary={r.behind > 0 && !pullBlocked}
+            onclick={() => pullRepo(r.path, project.name)}
+            disabled={!!pullBlocked || !!app.pulling || app.busy}
+            title="git pull --ff-only。早送りだけをして、マージコミットは作らない"
+          >
+            {pulling ? "取り込んでいます…" : "pull する"}
+          </button>
+        </h3>
+        {#if pullBlocked}
+          <p class="muted small">{pullBlocked}</p>
+        {:else}
+          <p class="small">
+            <span class="mono">{r.upstream}</span> から
+            {#if r.behind}<span class="badge info">未取り込み {r.behind}</span>{:else}<span class="muted">未取り込みなし</span>{/if}
+            <span class="muted">(最後の fetch {when(r.lastFetchAt)} の時点。pull のときに取り直す)</span>
+          </p>
+          {#if dirtyCount}
+            <p class="muted small">
+              未コミットの変更があります。取り込むファイルと重ならなければそのまま残り、重なるときは git が何も変えずに止めます (変更は失われません)。
+            </p>
+          {/if}
+        {/if}
+        {#if pullResult?.ok}<p class="small"><span class="badge good">{pullResult.text}</span></p>{/if}
+        {#if pullResult && !pullResult.ok}<p class="err small pre">{pullResult.text}</p>{/if}
+      </section>
+
+      <section>
         <h3>ブランチ</h3>
         <dl>
           <dt>現在</dt>
@@ -815,7 +898,7 @@
             </p>
           {/if}
           {#if lws?.osvScanner.error || lws?.task.registered === false}
-            <button class="small-btn" onclick={openLockwatchSettings}>設定の「脆弱性」を開く</button>
+            <button class="small-btn" onclick={openLockwatchSettings}>上の「脆弱性」タブを開く</button>
           {/if}
           {#if scanError}<p class="err small">{scanError}</p>{/if}
           {@const res = vulns.result}
@@ -1107,6 +1190,21 @@
   .small-btn {
     font-size: 12px;
     padding: 1px 8px;
+  }
+
+  /* リポジトリタブ: 未コミットの変更の札 */
+  .wt {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    margin: 0;
+  }
+
+  /* git の文は改行ごと出す */
+  .pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   .host {

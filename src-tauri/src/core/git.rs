@@ -360,30 +360,148 @@ pub fn fetch(path: &Path) -> Result<(), String> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
     util::hide_window(&mut cmd);
+    match run_with_timeout(cmd, FETCH_TIMEOUT)? {
+        None => Ok(()),
+        Some(err) => {
+            let first = err.lines().find(|l| !l.trim().is_empty()).unwrap_or("fetch に失敗しました");
+            Err(util::truncate_chars(first.trim(), 200))
+        }
+    }
+}
+
+/// cmd を動かして終わるのを待つ。成功なら None、失敗なら標準エラーの中身。timeout を過ぎたら打ち切って Err。
+/// 打ち切ると途中で止まるので、途中で止めてよいもの (fetch のような通信) にだけ使うこと。
+/// 標準エラーは別スレッドで読み続ける (出力が多くても、子がパイプへの書き込みで止まらないように)
+fn run_with_timeout(mut cmd: std::process::Command, timeout: std::time::Duration) -> Result<Option<String>, String> {
     let mut child = cmd.spawn().map_err(|e| format!("git を起動できません: {e}"))?;
+    let reader = child.stderr.take().map(|mut e| {
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            let _ = e.read_to_end(&mut bytes);
+            String::from_utf8_lossy(&bytes).into_owned()
+        })
+    });
     let started = std::time::Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                if status.success() {
-                    return Ok(());
-                }
-                let mut err = String::new();
-                if let Some(mut e) = child.stderr.take() {
-                    use std::io::Read;
-                    let _ = e.read_to_string(&mut err);
-                }
-                let first = err.lines().find(|l| !l.trim().is_empty()).unwrap_or("fetch に失敗しました");
-                return Err(util::truncate_chars(first.trim(), 200));
+                let err = reader.and_then(|r| r.join().ok()).unwrap_or_default();
+                return Ok(if status.success() { None } else { Some(err) });
             }
-            Ok(None) if started.elapsed() > FETCH_TIMEOUT => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("{} 秒で応答がないので打ち切りました", FETCH_TIMEOUT.as_secs()));
+            Ok(None) if started.elapsed() > timeout => {
+                // 読むスレッドは待たない (孫が生き残ってパイプを握っていると、いつまでも終わらない)
+                kill_tree(&mut child);
+                return Err(format!("{} 秒で応答がないので打ち切りました", timeout.as_secs()));
             }
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
             Err(e) => return Err(e.to_string()),
         }
+    }
+}
+
+/// 子を、その子孫 (git-remote-https など) ごと止める
+fn kill_tree(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let mut cmd = std::process::Command::new("taskkill");
+        cmd.args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        util::hide_window(&mut cmd);
+        let _ = cmd.status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// pull の通信 (fetch) の上限。取り込み (作業ツリーの書き換え) は途中で止めない
+const PULL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// pull の結果。before / after は前後の HEAD、commits は取り込んだコミットの数 (0 なら最新だった)
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullResult {
+    pub before: Option<String>,
+    pub after: Option<String>,
+    pub commits: u32,
+}
+
+/// `git pull --ff-only` と同じこと (追跡先を fetch して、早送りで取り込む) を 2 段でする。
+/// 早送りだけなので、マージコミットを作らず、競合も起こさない。早送りできない (分岐している) とき、
+/// 未コミットの変更と重なるときは、git が何も変えずに止める。
+/// 2 段に分けるのは、打ち切ってよいのが通信だけだから: fetch は PULL_TIMEOUT で打ち切り、
+/// 取り込み (作業ツリーを書き換え、post-merge フックも動く) は終わるまで待つ。
+/// 画面のボタンから動かすので、認証は git の資格情報マネージャーに任せる (端末での入力はさせない)。
+pub fn pull(path: &Path) -> Result<PullResult, String> {
+    // 失敗の理由を文から見分けるので、英語のままにする
+    let git_cmd = |args: &[&str]| {
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("-C")
+            .arg(path)
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("LC_ALL", "C")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped());
+        util::hide_window(&mut cmd);
+        cmd
+    };
+    let head = || git(path, &["rev-parse", "--verify", "--quiet", "HEAD"]).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+
+    // 追跡先が無い・ブランチにいないなら、通信する前に止める
+    let out = git_cmd(&["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+        .output()
+        .map_err(|e| format!("git を起動できません: {e}"))?;
+    if !out.status.success() {
+        return Err(explain_pull_error(String::from_utf8_lossy(&out.stderr).trim()));
+    }
+
+    let before = head();
+    // 引数なしの fetch は、今のブランチの追跡先のリモートから取る
+    if let Some(err) = run_with_timeout(git_cmd(&["fetch", "--quiet"]), PULL_TIMEOUT)? {
+        return Err(explain_pull_error(err.trim()));
+    }
+    let out = git_cmd(&["merge", "--ff-only", "--quiet", "@{upstream}"])
+        .output()
+        .map_err(|e| format!("git を起動できません: {e}"))?;
+    if !out.status.success() {
+        return Err(explain_pull_error(String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    let after = head();
+    let commits = match (&before, &after) {
+        (Some(a), Some(b)) if a != b => git(path, &["rev-list", "--count", &format!("{a}..{b}")])
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0),
+        _ => 0,
+    };
+    Ok(PullResult { before, after, commits })
+}
+
+/// pull が失敗した理由を、よくあるものは日本語で添える (git の文はそのまま後ろに付ける)
+fn explain_pull_error(err: &str) -> String {
+    let hint = if err.contains("would be overwritten") {
+        "未コミットの変更 (か未追跡のファイル) と重なるので、取り込みませんでした。コミットするか stash してから、もう一度 pull してください。"
+    } else if err.contains("Not possible to fast-forward") || err.contains("divergent") || err.contains("diverging") {
+        "ローカルとリモートが分岐していて、早送りできません。端末で rebase か merge をしてください。"
+    } else if err.contains("no tracking information") || err.contains("no upstream configured") {
+        "追跡先のブランチが決まっていません。"
+    } else if err.contains("not currently on a branch") || err.contains("HEAD does not point to a branch") {
+        "ブランチにいません (detached HEAD)。"
+    } else if err.contains("unmerged files") || err.contains("unfinished merge") || err.contains("MERGE_HEAD exists") {
+        "マージの途中です。競合を解決してコミットするか、取り消してください。"
+    } else {
+        ""
+    };
+    let err = if err.is_empty() { "pull に失敗しました" } else { err };
+    let body = util::truncate_chars(err, 800);
+    if hint.is_empty() {
+        body
+    } else {
+        format!("{hint}\n{body}")
     }
 }
 
@@ -492,5 +610,82 @@ mod stamp_tests {
         let wt = root.join("wt");
         run(&work, &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", "side"]);
         assert!(changes(&wt, || run(&work, &["branch", "-q", "other"])), "worktree から見た本体のブランチの作成");
+    }
+
+    /// 早送りだけを取り込み、重なる変更・分岐では何も変えずに止まるか
+    #[test]
+    fn pull_fast_forwards_only() {
+        let root = std::env::temp_dir().join("repotether-pull-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let remote = root.join("remote.git");
+        let a = root.join("a");
+        let b = root.join("b");
+        let commit = |dir: &Path, file: &str, text: &str| {
+            std::fs::write(dir.join(file), text).unwrap();
+            run(dir, &["add", file]);
+            run(dir, &["commit", "-q", "-m", text]);
+        };
+        run(&root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+        run(&root, &["init", "-q", a.to_str().unwrap()]);
+        commit(&a, "f.txt", "1");
+        run(&a, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        run(&a, &["push", "-q", "-u", "origin", "main"]);
+        run(&root, &["clone", "-q", "--branch", "main", remote.to_str().unwrap(), b.to_str().unwrap()]);
+
+        // 最新なら何もしない
+        let r = pull(&b).unwrap();
+        assert_eq!((r.commits, r.before == r.after), (0, true));
+
+        // 2 件進んだ分を取り込む。重ならない未コミットの変更 (未追跡のファイル) は残る
+        commit(&a, "f.txt", "2");
+        commit(&a, "g.txt", "3");
+        run(&a, &["push", "-q"]);
+        std::fs::write(b.join("local.txt"), "mine").unwrap();
+        let r = pull(&b).unwrap();
+        assert_eq!(r.commits, 2);
+        assert_eq!(std::fs::read_to_string(b.join("f.txt")).unwrap(), "2");
+        assert_eq!(std::fs::read_to_string(b.join("local.txt")).unwrap(), "mine");
+
+        // 未コミットの変更と重なるときは、取り込まずに止まる (変更は残る)
+        commit(&a, "f.txt", "4");
+        run(&a, &["push", "-q"]);
+        std::fs::write(b.join("f.txt"), "mine").unwrap();
+        let err = pull(&b).unwrap_err();
+        assert!(err.starts_with("未コミットの変更"), "{err}");
+        assert_eq!(std::fs::read_to_string(b.join("f.txt")).unwrap(), "mine");
+
+        // 分岐しているときも、何も変えずに止まる
+        run(&b, &["checkout", "-q", "--", "f.txt"]);
+        commit(&b, "h.txt", "local commit");
+        let head = git(&b, &["rev-parse", "HEAD"]).unwrap();
+        let err = pull(&b).unwrap_err();
+        assert!(err.starts_with("ローカルとリモートが分岐"), "{err}");
+        assert_eq!(git(&b, &["rev-parse", "HEAD"]).unwrap(), head);
+
+        // 追跡先の無いブランチ・ブランチにいないときは、通信する前に止まる
+        run(&b, &["checkout", "-q", "-b", "side"]);
+        let err = pull(&b).unwrap_err();
+        assert!(err.starts_with("追跡先のブランチが決まっていません"), "{err}");
+        run(&b, &["checkout", "-q", "--detach"]);
+        let err = pull(&b).unwrap_err();
+        assert!(err.starts_with("ブランチにいません"), "{err}");
+    }
+
+    /// 標準エラーにたくさん書く子でも、パイプが詰まって止まらないか (読みながら待つ)
+    #[test]
+    fn run_with_timeout_drains_stderr() {
+        let root = std::env::temp_dir().join("repotether-drain-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        run(&root, &["init", "-q"]);
+        // git の別名 (シェル) で、標準エラーへ約 400 KB 書いてから失敗させる (フックがたくさん書くのと同じ形)。
+        // 読まずに待つと、パイプが一杯になったところで子が止まり、打ち切りになる
+        let noise = format!("alias.noise=!yes {} | head -n 4000 >&2; exit 3", "x".repeat(100));
+        let mut cmd = std::process::Command::new("git");
+        cmd.arg("-C").arg(&root).args(["-c", &noise, "noise"]);
+        cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::piped());
+        let err = run_with_timeout(cmd, std::time::Duration::from_secs(20)).expect("詰まって打ち切りになった");
+        assert!(err.is_some_and(|e| e.len() >= 400_000));
     }
 }

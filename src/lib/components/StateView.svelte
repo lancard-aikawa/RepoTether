@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import type { Project } from "$lib/derive";
   import { hasLeftovers, leftoverWeight } from "$lib/derive";
   import type { RemoteKind } from "$lib/remotes";
@@ -25,6 +25,7 @@
   } from "$lib/store.svelte";
   import { depthOf, leafOf, MAX_DEPTH, parentOf, usageCount, type Placement } from "$lib/tags";
   import ExplorerView from "./ExplorerView.svelte";
+  import ProjectCell from "./ProjectCell.svelte";
   import ProjectDetail from "./ProjectDetail.svelte";
   import ProjectRow from "./ProjectRow.svelte";
 
@@ -54,6 +55,7 @@
   const layouts: { id: StateLayout; label: string }[] = [
     { id: "list", label: "一覧" },
     { id: "explorer", label: "エクスプローラ" },
+    { id: "cells", label: "セル" },
   ];
 
   const remoteLabels: Record<Exclude<RemoteFilter, "">, string> = {
@@ -170,6 +172,8 @@
   const starredCount = $derived(projects.filter((p) => p.starred && !p.hidden).length);
 
   const explorer = $derived(prefs.stateLayout === "explorer");
+  /** セル: 一覧と同じ分類の中で、行の代わりに大きいアイコンのマスを並べる */
+  const cells = $derived(prefs.stateLayout === "cells");
   /** 分類した木。エクスプローラでは分類なしでも根だけの木を作る */
   const grouped = $derived(
     prefs.stateGroup === "folder"
@@ -188,6 +192,50 @@
   const hasAnyTag = $derived(allTags().length > 0);
 
   const selected = $derived(projects.find((p) => p.key === selectedKey) ?? null);
+
+  // ほかのタブ (脆弱性など) から飛んできたら、そのプロジェクトの詳細を開き、一覧でも見える位置へ寄せる
+  $effect(() => {
+    const key = app.jumpTo;
+    if (!key) return;
+    app.jumpTo = null;
+    untrack(() => reveal(key));
+  });
+
+  /** 木の根から、そのプロジェクトを直に持つ階層までの道筋 (根は含めない)。無ければ null */
+  function trailTo(root: TreeNode, key: string): TreeNode[] | null {
+    for (const c of root.children) {
+      if (c.projects.some((p) => p.key === key)) return [c];
+      const rest = trailTo(c, key);
+      if (rest) return [c, ...rest];
+    }
+    return null;
+  }
+
+  /** そのプロジェクトを選び、一覧に出ていなければ出るようにする (絞り込みを解除し、畳んだ階層を開き、エクスプローラならその階層へ移る) */
+  async function reveal(key: string) {
+    selectedKey = key;
+    if (!shown.some((p) => p.key === key)) {
+      const hidden = projects.find((p) => p.key === key)?.hidden;
+      clearFilters();
+      if (hidden) visibility = "all";
+      await tick();
+    }
+    const trail = grouped ? trailTo(grouped, key) : null;
+    if (trail) {
+      if (explorer) {
+        // 左の木でも見えるように、上の階層を開いておく
+        const open = new Set(trail.slice(0, -1).map((n) => `explorer-${prefs.stateGroup}:${n.id}`));
+        prefs.collapsed = prefs.collapsed.filter((k) => !open.has(k));
+        prefs.explorerNode = trail[trail.length - 1].id;
+      } else {
+        const open = new Set(trail.map(cKey));
+        prefs.collapsed = prefs.collapsed.filter((k) => !open.has(k));
+      }
+      savePrefs();
+    }
+    await tick();
+    document.querySelector(`.state [data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: "center" });
+  }
 
   // ---- 畳む ----
   const collapsed = $derived(new Set(prefs.collapsed));
@@ -488,7 +536,7 @@
               <button
                 class="ghost icon-btn"
                 title="{c.label} の下のリポジトリだけを読み直す"
-                disabled={app.busy}
+                disabled={app.busy || !!app.pulling}
                 onclick={() => refresh(false, { kind: "under", path: c.id })}>この下を更新</button
               >
             </span>
@@ -513,17 +561,36 @@
             </li>
           {/if}
           {@render branch(c, depth + 1)}
-          {#each c.projects as p (p.key)}
-            <ProjectRow
-              project={p}
-              {now}
-              selected={p.key === selectedKey}
-              onselect={() => select(p)}
-              showTags={prefs.stateGroup !== "tag"}
-              ondragstart={prefs.stateGroup === "tag" ? (e) => startDrag(e, p, c.id) : undefined}
-              ondragend={endDrag}
-            />
-          {/each}
+          {#if cells}
+            {#if c.projects.length}
+              <li class="cells-wrap">
+                <ul class="cells">
+                  {#each c.projects as p (p.key)}
+                    <ProjectCell
+                      project={p}
+                      {now}
+                      selected={p.key === selectedKey}
+                      onselect={() => select(p)}
+                      ondragstart={prefs.stateGroup === "tag" ? (e) => startDrag(e, p, c.id) : undefined}
+                      ondragend={endDrag}
+                    />
+                  {/each}
+                </ul>
+              </li>
+            {/if}
+          {:else}
+            {#each c.projects as p (p.key)}
+              <ProjectRow
+                project={p}
+                {now}
+                selected={p.key === selectedKey}
+                onselect={() => select(p)}
+                showTags={prefs.stateGroup !== "tag"}
+                ondragstart={prefs.stateGroup === "tag" ? (e) => startDrag(e, p, c.id) : undefined}
+                ondragend={endDrag}
+              />
+            {/each}
+          {/if}
         </ul>
       {/if}
     </li>
@@ -679,6 +746,14 @@
         {/if}
         {@render branch(tree, 0)}
         {#if !tree.children.length}<li class="none muted">該当するプロジェクトはありません</li>{/if}
+      {:else if cells && flat.length}
+        <li class="cells-wrap">
+          <ul class="cells">
+            {#each flat as p (p.key)}
+              <ProjectCell project={p} {now} selected={p.key === selectedKey} onselect={() => select(p)} />
+            {/each}
+          </ul>
+        </li>
       {:else}
         {#each flat as p (p.key)}
           <ProjectRow project={p} {now} selected={p.key === selectedKey} onselect={() => select(p)} />
@@ -814,6 +889,21 @@
 
   .group {
     list-style: none;
+  }
+
+  /* セル表示: 分類の中にマスを敷き詰める */
+  .cells-wrap {
+    list-style: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .cells {
+    list-style: none;
+    margin: 0;
+    padding: 10px 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
   }
 
   .group-head {

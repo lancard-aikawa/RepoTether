@@ -17,6 +17,8 @@ struct AppState {
     config_path: PathBuf,
     cache_dir: PathBuf,
     refreshing: AtomicBool,
+    /// pull しているリポジトリ (path_key)。このあいだは読み直しを始めない (同じリポジトリを同時に触らないように)
+    pulling: Mutex<std::collections::HashSet<String>>,
     /// LockWatch のデータの場所。Python を起動して聞くので、設定の「LockWatch の場所」ごとに覚えておく
     lockwatch_locations: Mutex<Option<(String, core::lockwatch::Locations)>>,
 }
@@ -412,6 +414,9 @@ async fn refresh(
     scope: Option<core::model::Scope>,
 ) -> Result<Snapshot, String> {
     let state = app.state::<AppState>();
+    if !state.pulling.lock().unwrap().is_empty() {
+        return Err("pull の最中です。終わってからやり直してください".into());
+    }
     if state.refreshing.swap(true, Ordering::SeqCst) {
         return Err("更新中です".into());
     }
@@ -483,6 +488,36 @@ async fn clone_repo(url: String, dest: String) -> Result<String, String> {
         .await
         .map_err(|e| e.to_string())??;
     Ok(util::display_path(&dest))
+}
+
+/// path のリポジトリで `git pull --ff-only` をする (早送りだけ)。
+/// 動かせるのは、前回の取り込み結果にあるリポジトリだけ。読み直しの最中は断る (同じリポジトリを同時に触らないように)
+#[tauri::command]
+async fn pull_repo(app: AppHandle, path: String) -> Result<core::git::PullResult, String> {
+    let state = app.state::<AppState>();
+    let key = util::path_key(&path);
+    // 先に pull 中の印を付けてから読み直しを見る (読み直しの側は逆の順で見るので、すれ違っても両方が動くことはない)
+    if !state.pulling.lock().unwrap().insert(key.clone()) {
+        return Err("このリポジトリは pull の最中です".into());
+    }
+    let result = if state.refreshing.load(Ordering::SeqCst) {
+        Err("更新中です。終わってからやり直してください".to_string())
+    } else {
+        let snapshot_path = state.snapshot_path();
+        let key = key.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let known = core::load_snapshot(&snapshot_path).is_some_and(|s| s.repos.iter().any(|r| util::path_key(&r.path) == key));
+            if !known {
+                return Err(format!("{path} は一覧にあるリポジトリではありません"));
+            }
+            core::git::pull(Path::new(&path))
+        })
+        .await
+        .map_err(|e| e.to_string())
+        .and_then(|r| r)
+    };
+    state.pulling.lock().unwrap().remove(&key);
+    result
 }
 
 /// target: "vscode" / "terminal" / "explorer"
@@ -600,6 +635,7 @@ pub fn run() {
                 config_path,
                 cache_dir,
                 refreshing: AtomicBool::new(false),
+                pulling: Mutex::new(Default::default()),
                 lockwatch_locations: Mutex::new(None),
             });
             Ok(())
@@ -610,6 +646,7 @@ pub fn run() {
             load_snapshot,
             refresh,
             clone_repo,
+            pull_repo,
             open_in,
             open_external,
             page_title,

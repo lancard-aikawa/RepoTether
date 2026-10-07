@@ -439,10 +439,95 @@ function buildConfig() {
     tags,
     tagDefs: ["仕事", "仕事/ACME", "仕事/社内", "自作", "自作/アプリ", "自作/ツール", "自作/サイト", "自作/設定"],
     starred,
+    lockwatchPath: "C:\\Tools\\LockWatch",
     externalTools: [{ id: "tool1", label: "MdExplorer", command: "C:\\Tools\\fastmd-explorer.exe", args: "" }],
     links: Object.fromEntries(Object.entries(LINKS).map(([p, v]) => [key(p), v])),
   };
 }
+
+// ---- 脆弱性 (LockWatch の結果の見本) ----
+function buildVulns() {
+  const finding = (pkg, version, id, severity, fixed, summary, extra = {}) => ({
+    lockfile: "pnpm-lock.yaml",
+    ecosystem: "npm",
+    package: pkg,
+    version,
+    id,
+    aliases: [],
+    severity,
+    score: null,
+    fixed: [fixed],
+    informational: null,
+    malicious: false,
+    summary,
+    ...extra,
+  });
+  const repo = (path, visibility, findings, notices = [], fresh = []) => [
+    key(path),
+    {
+      targetId: key(path),
+      visibility,
+      result: {
+        status: "ok",
+        mode: visibility === "public" ? "online" : "offline",
+        scannedAt: iso(at(0, 6, 30)),
+        lockfiles: ["pnpm-lock.yaml"],
+        findings,
+        notices,
+        error: null,
+      },
+      new: fresh,
+    },
+  ];
+  const notice = { lockfile: "requirements.txt", kind: "unpinned", package: "requests", version: "", detail: ">=2.0", fresh: false };
+  return {
+    configured: true,
+    error: null,
+    locations: { dataDir: "C:\\Users\\demo\\.lockwatch", targets: "C:\\Users\\demo\\.lockwatch\\targets.json" },
+    scannedAt: iso(at(0, 6, 30)),
+    osvScanner: "2.2.2",
+    dbDownloadedAt: iso(at(1, 6, 30)),
+    byRepo: Object.fromEntries([
+      repo(
+        "C:/Repos/work/shop-frontend",
+        "private",
+        [
+          finding("demo-http", "1.6.2", "GHSA-demo-0001-aaaa", "high", "1.7.4", "リダイレクト先に認証ヘッダーを送ってしまう"),
+          finding("demo-template", "4.17.20", "GHSA-demo-0002-bbbb", "high", "4.17.21", "テンプレートからコマンドを実行できる"),
+          finding("demo-glob", "3.0.2", "GHSA-demo-0003-cccc", "medium", "3.0.3", "長い入力で処理が止まる"),
+        ],
+        [],
+        [["demo-http", "GHSA-demo-0001-aaaa"]],
+      ),
+      repo("C:/Repos/work/invoice-api", "private", [
+        finding("demo-yaml", "5.3.1", "GHSA-demo-0004-dddd", "critical", "5.4", "信頼できない YAML から任意のコードを実行できる", {
+          lockfile: "uv.lock",
+          ecosystem: "PyPI",
+        }),
+        finding("demo-jwt", "2.1.0", "GHSA-demo-0005-eeee", "medium", "2.4.0", "署名の検証を省ける", { lockfile: "uv.lock", ecosystem: "PyPI" }),
+      ]),
+      repo("C:/Repos/work/batch-jobs", "private", [], [notice]),
+      repo("C:/Repos/mywork/photo-organizer", "public", [
+        finding("demo-image", "0.24.1", "RUSTSEC-0000-0001", "low", "0.24.3", "壊れた画像で異常終了する", { lockfile: "Cargo.lock", ecosystem: "crates.io" }),
+      ]),
+      repo("C:/Repos/mywork/cli-timer", "public", []),
+      repo("C:/Repos/mywork/blog", "public", []),
+      repo("C:/Repos/mywork/dotfiles", "unknown", []),
+    ]),
+  };
+}
+
+const LOCKWATCH_STATUS = {
+  lockwatch: "0.3.0",
+  osvScanner: { path: "C:\\Users\\demo\\go\\bin\\osv-scanner.exe", version: "2.2.2", error: null },
+  dataDir: "C:\\Users\\demo\\.lockwatch",
+  targets: "C:\\Users\\demo\\.lockwatch\\targets.json",
+  targetsCount: 7,
+  targetsError: null,
+  latest: { scannedAt: iso(at(0, 6, 30)), repos: 7, errors: 0 },
+  db: { npm: iso(at(1, 6, 30)), PyPI: iso(at(1, 6, 30)), "crates.io": iso(at(1, 6, 30)) },
+  task: { name: "LockWatch", registered: true },
+};
 
 // ---- 開発サーバー ----
 async function up() {
@@ -484,6 +569,7 @@ async function main() {
   const start = Date.parse(demoSession.startedAt);
   const transcriptTimes = TRANSCRIPT.map((_, i) => new Date(start + i * 4 * 60000).toISOString());
   const config = buildConfig();
+  const vulns = buildVulns();
   const server = await ensureServer();
   const browser = await chromium.launch({ channel: "msedge" });
   try {
@@ -492,8 +578,10 @@ async function main() {
       page.setDefaultTimeout(8000);
       await page.route("**/dev-snapshot.json", (route) => route.fulfill({ json: snapshot }));
       await page.addInitScript(
-        ({ config, readme, prefs, transcript, icons, linkIcons }) => {
+        ({ config, readme, prefs, transcript, icons, linkIcons, vulns, lockwatchStatus }) => {
           window.__mockConfig = config;
+          window.__mockVulns = vulns;
+          window.__mockLockwatchStatus = lockwatchStatus;
           window.__mockLinkIcons = linkIcons;
           // マニュアルには「ブラウザ表示」の印を出さない。開発サーバーが起動直後にページを読み込み直しても
           // 消えないよう、読み込みのたびに入れる
@@ -516,6 +604,8 @@ async function main() {
           readme: README,
           icons: ICONS,
           linkIcons: LINK_ICONS,
+          vulns,
+          lockwatchStatus: LOCKWATCH_STATUS,
           prefs,
           transcript: TRANSCRIPT.map((e, i) => ({ at: transcriptTimes[i], tools: [], ...e })),
         },
@@ -572,6 +662,11 @@ async function main() {
     await shot(page, "03c_state_explorer.png");
     await page.close();
 
+    page = await open({ stateGroup: "folder", stateLayout: "cells" });
+    await page.locator(".cells li", { hasText: "invoice-api" }).locator(".cell").click();
+    await shot(page, "03d_state_cells.png");
+    await page.close();
+
     // 未クローンとクローン
     page = await open();
     await page.locator(".segmented button", { hasText: "未クローン" }).click();
@@ -585,6 +680,7 @@ async function main() {
       ["history", "10_history.png"],
       ["graph", "11_graph.png"],
       ["report", "12_report.png"],
+      ["vulns", "19_vulns.png"],
     ]) {
       page = await open({ tab });
       await shot(page, file);

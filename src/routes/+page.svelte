@@ -9,13 +9,16 @@
   import GraphView from "$lib/components/GraphView.svelte";
   import ReportView from "$lib/components/ReportView.svelte";
   import SettingsView from "$lib/components/SettingsView.svelte";
+  import VulnsView from "$lib/components/VulnsView.svelte";
+  import { heavyCount } from "$lib/vulns";
   import SessionTranscript from "$lib/components/SessionTranscript.svelte";
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "state", label: "状態" },
     { id: "history", label: "履歴" },
-    { id: "graph", label: "グラフ" },
     { id: "report", label: "日報" },
+    { id: "vulns", label: "脆弱性" },
+    { id: "graph", label: "グラフ" },
     { id: "settings", label: "設定" },
   ];
 
@@ -26,6 +29,14 @@
   );
   // 非表示にしたものは、状態タブの絞り込みでだけ見られる。履歴・グラフ・日報には出さない
   const visible = $derived(projects.filter((p) => !p.hidden));
+
+  /** 脆弱性タブに出す数: 緊急・高の合計 (「隠す」で隠したものは数えない) */
+  const heavyTotal = $derived(
+    visible.reduce(
+      (n, p) => n + (p.local ? heavyCount(app.vulns?.byRepo[p.local.id]?.result?.findings ?? [], prefs.vulnHide) : 0),
+      0,
+    ),
+  );
 
   // 相対時刻の表示を 1 分ごとに進める
   let now = $state(Date.now());
@@ -56,7 +67,9 @@
           class="tab"
           class:on={prefs.tab === t.id}
           aria-selected={prefs.tab === t.id}
-          onclick={() => selectTab(t.id)}>{t.label}</button
+          onclick={() => selectTab(t.id)}
+          >{t.label}{#if t.id === "vulns" && heavyTotal}<span class="tab-count num" title="緊急・高の脆弱性の数">{heavyTotal}</span
+            >{/if}</button
         >
       {/each}
     </div>
@@ -64,6 +77,9 @@
       {#if app.busy}
         <span class="spinner" aria-hidden="true"></span>
         <span>{app.progress}</span>
+      {:else if app.pulling}
+        <span class="spinner" aria-hidden="true"></span>
+        <span title={app.pulling}>pull しています</span>
       {:else if app.snapshot}
         <span
           class="muted"
@@ -80,24 +96,24 @@
         <!-- フォルダ表示で階層を選んでいるときは、その下だけを読み直す (速い) -->
         <button
           onclick={() => refresh(false, { kind: "under", path: f.path })}
-          disabled={app.busy}
+          disabled={app.busy || !!app.pulling}
           title="{f.path} の下のリポジトリと、Claude のセッションを読み直す">{f.label} 以下を更新</button
         >
         <button
           onclick={() => refresh(false)}
-          disabled={app.busy}
+          disabled={app.busy || !!app.pulling}
           title="ローカルのリポジトリをすべてと、Claude のセッションを読み直す">すべて更新</button
         >
       {:else}
         <button
           onclick={() => refresh(false)}
-          disabled={app.busy}
+          disabled={app.busy || !!app.pulling}
           title="ローカルのリポジトリをすべてと、Claude のセッションを読み直す">更新</button
         >
       {/if}
       <button
         onclick={() => refresh(true)}
-        disabled={app.busy || !app.config?.accounts.some((a) => a.enabled)}
+        disabled={app.busy || !!app.pulling || !app.config?.accounts.some((a) => a.enabled)}
         title="GitHub / Gogs のリポジトリ一覧も取り直す">リモートも更新</button
       >
     </div>
@@ -128,6 +144,8 @@
       <GraphView projects={visible} {now} />
     {:else if prefs.tab === "report"}
       <ReportView projects={visible} />
+    {:else if prefs.tab === "vulns"}
+      <VulnsView projects={visible} {now} />
     {:else}
       <SettingsView {projects} />
     {/if}
@@ -205,6 +223,17 @@
     color: var(--ink);
     font-weight: 600;
     border-bottom-color: var(--accent);
+  }
+
+  /* タブに付ける数 (押せるものではないので平らな札) */
+  .tab-count {
+    margin-left: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    background: var(--st-high);
+    border-radius: 999px;
+    padding: 0 6px;
   }
 
   .status {

@@ -21,6 +21,12 @@ export const app = $state({
   vulns: null as VulnReport | null,
   /** LockWatch が使える状態か (osv-scanner・定期実行など)。脆弱性タブの案内に使う。まだ確かめていなければ null */
   lockwatchStatus: null as LockwatchStatus | null,
+  /** pull しているリポジトリのパス。このあいだは更新 (自動も) をしない */
+  pulling: null as string | null,
+  /** 最後の pull の結果 (リポジトリのパスごとに、詳細パネルの「リポジトリ」タブに出す) */
+  pullResult: null as { path: string; ok: boolean; text: string } | null,
+  /** 状態タブで開くプロジェクト (ほかのタブから飛ぶとき)。状態タブが受け取ったら null に戻す */
+  jumpTo: null as string | null,
 });
 
 /** 画面の好み (その端末だけ)。失われても困らないものだけ置く */
@@ -29,7 +35,7 @@ export const prefs = $state({
   includeAutomated: false,
   /** 状態タブの分類: なし / フォルダ / タグ */
   stateGroup: "none" as StateGroup,
-  /** 状態タブの見せ方: 一覧 / エクスプローラ (左に木、右に表) */
+  /** 状態タブの見せ方: 一覧 / エクスプローラ (左に木、右に表) / セル (大きいアイコンを並べる) */
   stateLayout: "list" as StateLayout,
   /** ツリーで畳んでいるノード ("folder:<id>" / "tag:<id>"。エクスプローラの木は "explorer-folder:<id>" など) */
   collapsed: [] as string[],
@@ -57,7 +63,7 @@ export const prefs = $state({
   /** 一覧の密度: 標準 / コンパクト (行を詰め、Claude の一行要約を省く) */
   density: "normal" as "normal" | "compact",
   /** 設定で最後に開いたタブ */
-  settingsTab: "roots" as "roots" | "authors" | "accounts" | "vulns" | "other" | "hidden" | "errors",
+  settingsTab: "roots" as "roots" | "authors" | "accounts" | "other" | "hidden" | "errors",
   /** 脆弱性で隠すもの (深刻度 low など、知らせの種類 unmaintained など)。一覧の印にも効く */
   vulnHide: [] as string[],
 });
@@ -67,7 +73,7 @@ export type ReportViewMode = "edit" | "split" | "preview";
 export type DetailTab = "summary" | "git" | "commits" | "claude" | "vulns" | "readme";
 
 export type StateGroup = "none" | "folder" | "tag";
-export type StateLayout = "list" | "explorer";
+export type StateLayout = "list" | "explorer" | "cells";
 export type Theme = "system" | "light" | "dark";
 
 /** テーマと密度を画面に当てる (テーマはウィンドウのタイトルバーにも)。system なら OS の設定に任せる */
@@ -81,7 +87,15 @@ export function applyTheme() {
   });
 }
 
-export type Tab = "state" | "history" | "graph" | "report" | "settings";
+export type Tab = "state" | "history" | "report" | "vulns" | "graph" | "settings";
+
+/** 状態タブでそのプロジェクトの詳細パネルを開く (脆弱性タブなどから) */
+export function openProject(key: string, detailTab?: DetailTab) {
+  if (detailTab) prefs.detailTab = detailTab;
+  prefs.tab = "state";
+  app.jumpTo = key;
+  savePrefs();
+}
 
 const PREFS_KEY = "repotether.prefs";
 
@@ -177,7 +191,7 @@ export function hasRemoteAccounts(): boolean {
  */
 export function startAutoRefresh(): () => void {
   const check = () => {
-    if (app.busy || document.hidden || !app.snapshot) return;
+    if (app.busy || app.pulling || document.hidden || !app.snapshot) return;
     const now = Date.now();
     const due = (min: number, at: string | null | undefined) =>
       min > 0 && (!at || now - Date.parse(at) >= min * 60000);
@@ -215,7 +229,8 @@ export function autoScope(): api.RefreshScope {
 
 /** 読み直す。scope を省くと (手動の「更新」) すべてのリポジトリを git から読み直す */
 export async function refresh(includeRemote: boolean, scope: api.RefreshScope = { kind: "all" }) {
-  if (app.busy) return;
+  // pull の最中は読み直さない (同じリポジトリを同時に触らない)。pull が終わると、そのリポジトリを読み直す
+  if (app.busy || app.pulling) return;
   app.busy = true;
   app.error = "";
   app.progress = includeRemote
@@ -234,6 +249,32 @@ export async function refresh(includeRemote: boolean, scope: api.RefreshScope = 
   }
   // 結果は LockWatch の定期実行で変わるので、更新のたびに読み直す (targets.json も今の一覧にそろう)
   await loadVulns();
+}
+
+// ---- pull ----
+
+/**
+ * そのリポジトリで git pull --ff-only をする (早送りだけ)。結果は app.pullResult とトーストに出す。
+ * 終わったら、失敗しても fetch は済んでいるので、そのリポジトリを読み直す。
+ * 画面を切り替えても結果が迷子にならないよう、名前は押したときのものを受け取る
+ */
+export async function pullRepo(path: string, name: string) {
+  if (app.busy || app.pulling) return;
+  app.pulling = path;
+  app.pullResult = null;
+  try {
+    const res = await api.pullRepo(path);
+    const text =
+      res.commits > 0 ? `${res.commits} 件のコミットを取り込みました` : res.before !== res.after ? "取り込みました" : "すでに最新です";
+    app.pullResult = { path, ok: true, text };
+    toast(`${name}: ${text}`);
+  } catch (e) {
+    app.pullResult = { path, ok: false, text: errorText(e) };
+    toast(`${name}: pull できませんでした (詳細パネルの「リポジトリ」タブに理由があります)`);
+  } finally {
+    app.pulling = null;
+  }
+  await refresh(false, { kind: "under", path });
 }
 
 // ---- 脆弱性 (LockWatch) ----

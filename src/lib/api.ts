@@ -80,6 +80,8 @@ type MockHooks = {
   __mockVulns?: VulnReport;
   __mockVulnCheck?: VulnCheck;
   __mockLockwatchStatus?: LockwatchStatus;
+  __mockPull?: PullResult | string;
+  __mockPullDelay?: number;
   /** パス → アイコンの URL (data: など) */
   __mockIcons?: Record<string, string>;
   /** サイト (origin) → 関連ページのアイコンの URL */
@@ -324,6 +326,27 @@ export async function openUrl(url: string): Promise<void> {
 export async function cloneRepo(url: string, dest: string): Promise<string> {
   if (!inTauri) throw new Error("ブラウザ表示ではクローンできません");
   return call("clone_repo", { url, dest });
+}
+
+/** pull の結果。before / after は前後の HEAD、commits は取り込んだコミットの数 (0 なら最新だった) */
+export interface PullResult {
+  before: string | null;
+  after: string | null;
+  commits: number;
+}
+
+/** そのリポジトリで git pull --ff-only をする (早送りだけ)。失敗の理由は例外の文に入る */
+export async function pullRepo(path: string): Promise<PullResult> {
+  if (!inTauri) {
+    // 画面の確認用: __mockPull が文字列なら失敗の文、そうでなければ結果。__mockPullDelay ミリ秒だけ待ってから返す
+    const given = hooks().__mockPull;
+    const delay = hooks().__mockPullDelay;
+    if (delay) await new Promise((r) => setTimeout(r, delay));
+    if (typeof given === "string") throw new Error(given);
+    if (given) return given;
+    throw new Error("ブラウザ表示では pull できません");
+  }
+  return call("pull_repo", { path });
 }
 
 export async function trustRepo(path: string): Promise<void> {
