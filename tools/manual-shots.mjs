@@ -687,6 +687,17 @@ async function main() {
       await page.close();
     }
 
+    // グラフ: マス・棒を押すと、右にその日・週の中身が出る
+    page = await open({ tab: "graph" });
+    await page.locator("svg rect.on:not(.hit)").last().click();
+    await page.waitForSelector(".picked .p-group");
+    await page.locator(".m-cell.on").first().click();
+    await page.waitForSelector(".picked .p-group");
+    await page.locator("svg rect.hit.on").last().click();
+    await page.waitForSelector(".picked .p-group");
+    await shot(page, "11b_graph_picked.png");
+    await page.close();
+
     for (const [stab, file] of [
       ["roots", "13_settings_roots.png"],
       ["authors", "14_settings_authors.png"],

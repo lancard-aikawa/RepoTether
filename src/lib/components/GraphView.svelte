@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { DailyCounts, Project } from "$lib/derive";
-  import { buildActivity, hasLeftovers } from "$lib/derive";
-  import { addDays, dayKey, formatDayLabel, parseDayKey, startOfDay, weekStart } from "$lib/format";
-  import { prefs, savePrefs } from "$lib/store.svelte";
+  import { buildActivity, hasLeftovers, historyItems } from "$lib/derive";
+  import { addDays, dayKey, formatDayLabel, formatTime, parseDayKey, startOfDay, weekStart } from "$lib/format";
+  import { openProject, openTranscript, prefs, savePrefs } from "$lib/store.svelte";
 
   let { projects, now }: { projects: Project[]; now: number } = $props();
 
@@ -205,6 +205,56 @@
     tip = null;
   }
 
+  // ---- 押したマス・棒の中身 (右のパネル) ----
+  /** 押した範囲。id は印を付けるマス・棒を見分ける ("day:2026-10-01" / "week:<開始>" / "cell:<プロジェクト>:<開始>") */
+  let picked = $state<{ id: string; from: number; to: number; label: string; projectKey?: string } | null>(null);
+
+  function pick(id: string, from: number, days: number, label: string, projectKey?: string) {
+    hideTip();
+    // 同じ所をもう一度押したら閉じる
+    picked = picked?.id === id ? null : { id, from, to: addDays(from, days), label, projectKey };
+  }
+  const pickDay = (day: string) => pick(`day:${day}`, parseDayKey(day).getTime(), 1, formatDayLabel(day));
+  const pickWeek = (start: number) => pick(`week:${start}`, start, 7, weekLabel(start));
+  const pickCell = (p: Project, start: number) => pick(`cell:${p.key}:${start}`, start, 7, `${p.name} / ${weekLabel(start)}`, p.key);
+
+  /** 押した範囲の出来事を、プロジェクトごとに (グラフの数え方と同じ: 自分のコミット・選んだ指標) */
+  const pickedGroups = $derived.by(() => {
+    const sel = picked;
+    if (!sel) return [];
+    const items = historyItems(sel.projectKey ? projects.filter((p) => p.key === sel.projectKey) : projects, {
+      from: sel.from,
+      to: sel.to,
+      mineOnly: true,
+      includeAutomated: prefs.includeAutomated,
+      kinds: { commit: metric !== "prompt", session: metric !== "commit" },
+    });
+    const groups: { project: Project; items: typeof items; commits: number; prompts: number }[] = [];
+    for (const i of items) {
+      let g = groups.find((x) => x.project.key === i.project.key);
+      if (!g) groups.push((g = { project: i.project, items: [], commits: 0, prompts: 0 }));
+      g.items.push(i);
+      if (i.kind === "commit") g.commits++;
+      else g.prompts += i.prompts;
+    }
+    return groups.sort((a, b) => b.commits + b.prompts - (a.commits + a.prompts));
+  });
+  const pickedTotal = $derived({
+    commits: pickedGroups.reduce((n, g) => n + g.commits, 0),
+    prompts: pickedGroups.reduce((n, g) => n + g.prompts, 0),
+  });
+
+  /** 1 日だけなら時刻、週なら日付も */
+  function when(at: number): string {
+    if (picked && picked.to - picked.from <= 86400000) return formatTime(at);
+    const d = new Date(at);
+    return `${d.getMonth() + 1}/${d.getDate()} ${formatTime(at)}`;
+  }
+
+  function counted(commits: number, prompts: number): string {
+    return [commits ? `コミット ${commits} 件` : "", prompts ? `プロンプト ${prompts} 回` : ""].filter(Boolean).join("・") || "なし";
+  }
+
   function weekLabel(start: number): string {
     const d = new Date(start);
     return `${d.getMonth() + 1}/${d.getDate()} の週`;
@@ -232,6 +282,7 @@
     >
   </div>
 
+  <div class="body">
   <div class="scroll">
     <div class="tiles">
       {#each tiles as t (t.label)}
@@ -243,7 +294,7 @@
     </div>
 
     <section class="panel card">
-      <h2>日ごとの{metricLabel[metric]} <span class="muted small">過去 1 年</span></h2>
+      <h2>日ごとの{metricLabel[metric]} <span class="muted small">過去 1 年・マスを押すとその日の中身</span></h2>
       <div class="hscroll">
         <svg width={cal.width} height={cal.height} role="img" aria-label="日ごとの活動量のカレンダー">
           {#each cal.months as m (m.x)}
@@ -260,7 +311,10 @@
               height={CELL}
               rx="2"
               class="l{c.l}"
+              class:on={c.v > 0}
+              class:sel={picked?.id === `day:${c.day}`}
               role="presentation"
+              onclick={() => c.v > 0 && pickDay(c.day)}
               onmouseenter={(e) => showTip(e, formatDayLabel(c.day), c.v ? unit(c.v) : "なし")}
               onmousemove={(e) => showTip(e, formatDayLabel(c.day), c.v ? unit(c.v) : "なし")}
               onmouseleave={hideTip}
@@ -278,7 +332,7 @@
     </section>
 
     <section class="panel card">
-      <h2>週ごとの{metricLabel[metric]} <span class="muted small">過去 {WEEKS} 週</span></h2>
+      <h2>週ごとの{metricLabel[metric]} <span class="muted small">過去 {WEEKS} 週・棒を押すとその週の中身</span></h2>
       <div class="hscroll">
         <svg width={40 + WEEKS * BAR_SLOT} height={BAR_H + 30} role="img" aria-label="週ごとの活動量">
           {#each [0, 0.5, 1] as f (f)}
@@ -295,7 +349,10 @@
               width={BAR_SLOT}
               height={BAR_H}
               class="hit"
+              class:on={w.v > 0}
+              class:sel={picked?.id === `week:${w.start}`}
               role="presentation"
+              onclick={() => w.v > 0 && pickWeek(w.start)}
               onmouseenter={(e) => showTip(e, weekLabel(w.start), unit(w.v))}
               onmousemove={(e) => showTip(e, weekLabel(w.start), unit(w.v))}
               onmouseleave={hideTip}
@@ -318,17 +375,22 @@
     </section>
 
     <section class="panel card">
-      <h2>プロジェクトごとの{metricLabel[metric]} <span class="muted small">過去 {WEEKS} 週・最近触った順</span></h2>
+      <h2>プロジェクトごとの{metricLabel[metric]} <span class="muted small">過去 {WEEKS} 週・最近触った順・マスを押すとその週の中身</span></h2>
       {#if matrix.rows.length}
         <div class="hscroll">
           <div class="matrix" style="--cols: {WEEKS}">
             {#each matrix.rows as row (row.project.key)}
-              <div class="m-name" title={row.project.path ?? row.project.name}>{row.project.name}</div>
+              <button class="m-name" title="状態タブでこのプロジェクトを開く" onclick={() => openProject(row.project.key)}
+                >{row.project.name}</button
+              >
               <div class="m-cells">
                 {#each row.levels as l, i (i)}
                   <span
                     class="m-cell l{l}"
+                    class:on={row.cells[i] > 0}
+                    class:sel={picked?.id === `cell:${row.project.key}:${weeks[i].start}`}
                     role="presentation"
+                    onclick={() => row.cells[i] > 0 && pickCell(row.project, weeks[i].start)}
                     onmouseenter={(e) =>
                       showTip(e, `${row.project.name} / ${weekLabel(weeks[i].start)}`, row.cells[i] ? unit(row.cells[i]) : "なし")}
                     onmousemove={(e) =>
@@ -353,7 +415,9 @@
         <ul class="stalled">
           {#each stalled as s (s.project.key)}
             <li>
-              <span class="name">{s.project.name}</span>
+              <button class="name" title="状態タブでこのプロジェクトを開く" onclick={() => openProject(s.project.key)}
+                >{s.project.name}</button
+              >
               <span class="muted small">最後 {formatDayLabel(s.lastDay)}</span>
               {#each s.project.leftovers.filter((l) => l.severity !== "info") as l (l.kind)}
                 <span class="badge {l.severity}">{l.label}</span>
@@ -365,6 +429,52 @@
         <p class="muted">ありません</p>
       {/if}
     </section>
+  </div>
+
+  {#if picked}
+    <aside class="picked">
+      <div class="p-head">
+        <div>
+          <div class="p-title">{picked.label}</div>
+          <div class="muted small">{counted(pickedTotal.commits, pickedTotal.prompts)}</div>
+        </div>
+        <button onclick={() => (picked = null)}>閉じる</button>
+      </div>
+      <div class="p-scroll">
+        {#each pickedGroups as g (g.project.key)}
+          <div class="p-group">
+            <div class="p-proj">
+              <button class="name" title="状態タブでこのプロジェクトを開く" onclick={() => openProject(g.project.key)}
+                >{g.project.name}</button
+              >
+              <span class="muted small">{counted(g.commits, g.prompts)}</span>
+            </div>
+            <ul>
+              {#each g.items as i, idx (idx)}
+                <li>
+                  <span class="time num muted">{when(i.at)}</span>
+                  {#if i.kind === "commit"}
+                    <span class="kind">commit</span>
+                    <span class="text">{i.commit.subject}</span>
+                  {:else}
+                    <span class="kind claude">Claude</span>
+                    <span class="text">
+                      <button class="s-title" onclick={() => openTranscript(i.session)} title="会話の全文を見る"
+                        >{i.session.title ?? i.session.firstPrompt ?? "(無題)"}</button
+                      >
+                      {#if i.prompts}<span class="muted small"> プロンプト {i.prompts} 回</span>{/if}
+                    </span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          </div>
+        {:else}
+          <p class="muted">この期間の出来事はありません</p>
+        {/each}
+      </div>
+    </aside>
+  {/if}
   </div>
 
   {#if tip}
@@ -388,9 +498,16 @@
     border-bottom: 1px solid var(--line);
   }
 
+  .body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
   .scroll {
     overflow-y: auto;
     flex: 1;
+    min-width: 0;
     padding: 16px;
     display: flex;
     flex-direction: column;
@@ -447,8 +564,40 @@
     fill: transparent;
   }
 
-  .hit:hover + .bar {
-    filter: brightness(1.1);
+  .hit.on {
+    cursor: pointer;
+  }
+
+  .hit.on:hover {
+    fill: var(--hover);
+  }
+
+  .hit.on:hover + .bar {
+    filter: brightness(1.15);
+  }
+
+  .hit.sel {
+    fill: var(--hover);
+    stroke: var(--accent);
+    stroke-width: 1;
+  }
+
+  /* 押せるマス (活動のある日・週) は、乗せると枠が出る。選んだマスは枠を残す */
+  rect.on,
+  .m-cell.on {
+    cursor: pointer;
+  }
+
+  rect.on:not(.hit):hover,
+  rect.sel:not(.hit) {
+    stroke: var(--ink);
+    stroke-width: 1.5;
+  }
+
+  .m-cell.on:hover,
+  .m-cell.sel {
+    outline: 1.5px solid var(--ink);
+    outline-offset: -1px;
   }
 
   .l0 {
@@ -495,6 +644,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: left;
+    padding: 0 6px;
   }
 
   .m-cells {
@@ -529,8 +680,89 @@
     flex-wrap: wrap;
   }
 
-  .stalled .name {
+  .name {
     font-weight: 600;
+    padding: 0 6px;
+  }
+
+  .picked {
+    width: 400px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-left: 1px solid var(--line);
+    background: var(--surface);
+  }
+
+  .p-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    gap: 8px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .p-title {
+    font-weight: 600;
+    font-size: 15px;
+  }
+
+  .p-scroll {
+    overflow-y: auto;
+    flex: 1;
+    padding: 4px 14px 24px;
+  }
+
+  .p-group {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .p-proj {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+
+  .p-group ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .p-group li {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    font-size: 13px;
+  }
+
+  .time {
+    flex: none;
+    font-size: 12px;
+  }
+
+  .kind {
+    flex: none;
+    font-size: 11px;
+    color: var(--ink-2);
+  }
+
+  .text {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .s-title {
+    text-align: left;
+    padding: 0 6px;
   }
 
   .small {
