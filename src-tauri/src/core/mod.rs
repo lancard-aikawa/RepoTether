@@ -70,10 +70,8 @@ pub fn build_local(
         paths.insert(util::path_key(&p.to_string_lossy()), p);
     }
     if cfg.include_session_folders {
-        for s in &sessions {
-            if let Some(repo) = s.cwd.as_deref().and_then(|c| discover::enclosing_repo(Path::new(c))) {
-                paths.entry(util::path_key(&repo.to_string_lossy())).or_insert(repo);
-            }
+        for repo in discover::enclosing_repos(sessions.iter().filter_map(|s| s.cwd.as_deref())) {
+            paths.entry(util::path_key(&repo.to_string_lossy())).or_insert(repo);
         }
     }
 

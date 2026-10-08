@@ -74,6 +74,54 @@ pub fn enclosing_repo(path: &Path) -> Option<PathBuf> {
     None
 }
 
+/// つながらないドライブや共有を待つ上限。つながる場所なら、ふつうは一瞬で返る
+const REACH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// フォルダの一覧 (セッションのフォルダ) から、それぞれを含むリポジトリを探す。同じリポジトリは 1 つにまとめる。
+/// つながらないネットワークの場所 (\\server\share\...) は、OS が数十秒待ってから「無い」と答えるので、
+/// ドライブや共有ごとに先に時間を切って確かめ、届かなければその下は調べない
+pub fn enclosing_repos<'a>(dirs: impl IntoIterator<Item = &'a str>) -> Vec<PathBuf> {
+    let dirs: std::collections::BTreeSet<&str> = dirs.into_iter().collect();
+    let mut reach: std::collections::HashMap<PathBuf, bool> = Default::default();
+    let mut found = std::collections::BTreeSet::new();
+    for d in dirs {
+        let dir = Path::new(d);
+        // ancestors の最後が、ドライブや共有の根 (C:\ / \\server\share\)
+        let Some(root) = dir.ancestors().last().filter(|r| !r.as_os_str().is_empty()) else { continue };
+        if !*reach.entry(root.to_path_buf()).or_insert_with(|| reachable(root)) {
+            continue;
+        }
+        if let Some(repo) = enclosing_repo(dir) {
+            found.insert(repo);
+        }
+    }
+    found.into_iter().collect()
+}
+
+/// 届かなかった場所を、もう一度確かめるまでの時間 (更新のたびに REACH_TIMEOUT を待たないように)
+const REACH_RETRY: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// REACH_TIMEOUT のうちに root が読めるか。待ちきれなかったときのスレッドは、OS が答えるまで残して捨てる。
+/// 届かなかった場所は REACH_RETRY のあいだ覚えておき、確かめずに「届かない」と答える
+fn reachable(root: &Path) -> bool {
+    static UNREACHABLE: std::sync::Mutex<Vec<(PathBuf, std::time::Instant)>> = std::sync::Mutex::new(Vec::new());
+    let mut dead = UNREACHABLE.lock().unwrap();
+    dead.retain(|(_, at)| at.elapsed() < REACH_RETRY);
+    if dead.iter().any(|(p, _)| p == root) {
+        return false;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let probe = root.to_path_buf();
+    std::thread::spawn(move || {
+        let _ = tx.send(std::fs::metadata(&probe).is_ok());
+    });
+    let ok = rx.recv_timeout(REACH_TIMEOUT).unwrap_or(false);
+    if !ok {
+        dead.push((root.to_path_buf(), std::time::Instant::now()));
+    }
+    ok
+}
+
 /// `.git` がファイル (worktree / サブモジュール) のときは、指している git ディレクトリを返す。
 pub fn git_dir(repo: &Path) -> Option<PathBuf> {
     let dot = repo.join(".git");
@@ -84,4 +132,26 @@ pub fn git_dir(repo: &Path) -> Option<PathBuf> {
     let rel = text.lines().find_map(|l| l.strip_prefix("gitdir:"))?.trim();
     let p = PathBuf::from(rel);
     Some(if p.is_absolute() { p } else { repo.join(p) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enclosing_repos_dedupes_and_skips_unreachable() {
+        let root = std::env::temp_dir().join("repotether-enclosing-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("a/.git")).unwrap();
+        std::fs::create_dir_all(root.join("a/src/deep")).unwrap();
+        std::fs::create_dir_all(root.join("plain")).unwrap();
+        let s = |p: &str| root.join(p).to_string_lossy().into_owned();
+        let dirs = [s("a"), s("a/src"), s("a/src/deep"), s("plain"), s("gone")];
+        // 192.0.2.0/24 は文書用のアドレスで、どこにもつながらない
+        let dead = r"\\192.0.2.1\share\proj\src";
+        let started = std::time::Instant::now();
+        let found = enclosing_repos(dirs.iter().map(|d| d.as_str()).chain([dead, dead]));
+        assert_eq!(found, [root.join("a")]);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "つながらない場所を待ち続けた: {:?}", started.elapsed());
+    }
 }
