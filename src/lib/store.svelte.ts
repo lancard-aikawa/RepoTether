@@ -63,7 +63,7 @@ export const prefs = $state({
   /** 一覧の密度: 標準 / コンパクト (行を詰め、Claude の一行要約を省く) */
   density: "normal" as "normal" | "compact",
   /** 設定で最後に開いたタブ */
-  settingsTab: "roots" as "roots" | "authors" | "accounts" | "other" | "hidden" | "errors",
+  settingsTab: "roots" as "roots" | "authors" | "accounts" | "claude" | "tools" | "display" | "hidden" | "errors",
   /** 脆弱性で隠すもの (深刻度 low など、知らせの種類 unmaintained など)。一覧の印にも効く */
   vulnHide: [] as string[],
 });

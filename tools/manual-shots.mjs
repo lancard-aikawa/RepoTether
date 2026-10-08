@@ -691,7 +691,9 @@ async function main() {
       ["roots", "13_settings_roots.png"],
       ["authors", "14_settings_authors.png"],
       ["accounts", "15_settings_accounts.png"],
-      ["other", "16_settings_other.png"],
+      ["claude", "16_settings_claude.png"],
+      ["tools", "16b_settings_tools.png"],
+      ["display", "16c_settings_display.png"],
     ]) {
       page = await open({ tab: "settings", settingsTab: stab });
       await shot(page, file);

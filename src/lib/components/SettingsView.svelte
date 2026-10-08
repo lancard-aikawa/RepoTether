@@ -8,7 +8,9 @@
   import {
     app,
     applyTheme,
+    autoScope,
     errorText,
+    loadVulns,
     prefs,
     refresh,
     savePrefs,
@@ -64,6 +66,10 @@
   }
 
   const configDirty = $derived(JSON.stringify(draft) !== JSON.stringify(app.config));
+  const differs = (...keys: (keyof Config)[]) => keys.some((k) => JSON.stringify(draft[k]) !== JSON.stringify(app.config![k]));
+  // 読み直すのは、取り込みの結果が変わる項目を変えたときだけ (メールアドレス・外部ツール・テーマなどでは読み直さない)
+  const accountsChanged = $derived(differs("accounts"));
+  const localChanged = $derived(differs("roots", "scanDepth", "includeSessionFolders", "claudeDir", "historyDays"));
 
   // 画面の好み (この PC だけ) の下書き。設定と同じく、保存するまで反映しない
   const PREF_KEYS = [
@@ -84,6 +90,10 @@
   /** 設定ファイル以外 (画面の好み・Claude Code の保存期間) に、保存していない変更があるか */
   function extraDirty() {
     return prefsDirty || retentionChanged;
+  }
+  /** retentionChanged は下で決まるので、タブの印からは関数を通して読む */
+  function retentionDirty() {
+    return retentionChanged;
   }
   const dirty = $derived(configDirty || extraDirty());
   const candidates = $derived(
@@ -169,9 +179,14 @@
     }
     saving = true;
     try {
-      // 読み直すのは設定ファイルの中身を変えたときだけ (テーマなどを変えただけなら読み直さない)
+      const old = app.config!;
       const changed = configDirty;
-      const accountsChanged = JSON.stringify(draft.accounts) !== JSON.stringify(app.config?.accounts);
+      // 保存のあとで下書きを作り直すので、何が変わったかは先に見ておく
+      const [remote, reread] = [accountsChanged, localChanged || accountsChanged];
+      // 履歴の期間を延ばしたときだけ、すべてのリポジトリからコミットを読み直す。
+      // ほかは自動更新と同じ範囲で足りる (新しく見つかったリポジトリは範囲に関係なく読む)
+      const longer = draft.historyDays > old.historyDays;
+      const vulnsChanged = differs("lockwatchPath", "hidden");
       if (changed) await updateConfig(structuredClone($state.snapshot(draft)));
       if (retentionChanged) retention = await api.setClaudeRetention(chosenDays);
       if (prefsDirty) {
@@ -182,7 +197,10 @@
       // 入力したトークンは保存後に消えるので、保存後の設定から下書きを作り直す
       revert();
       toast("保存しました");
-      if (changed) await refresh(accountsChanged);
+      // 読み直しは待たない (進み具合は上の帯に出る)。保存はここで終わり
+      if (reread) void refresh(remote, longer ? { kind: "all" } : autoScope());
+      // 読み直さないときも、LockWatch の対象 (targets.json) と結果は今の設定にそろえる
+      else if (vulnsChanged) void loadVulns();
     } catch (e) {
       toast(errorText(e));
     } finally {
@@ -198,7 +216,7 @@
   }
 
   // ---- タブ ----
-  type SettingsTab = "roots" | "authors" | "accounts" | "other" | "hidden" | "errors";
+  type SettingsTab = "roots" | "authors" | "accounts" | "claude" | "tools" | "display" | "hidden" | "errors";
   const saved = $derived(app.config!);
   const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
   const tabs = $derived(
@@ -208,22 +226,19 @@
           id: "roots",
           label: "探す場所",
           dirty: !same(
-            [draft.roots, draft.scanDepth, draft.historyDays, draft.includeSessionFolders],
-            [saved.roots, saved.scanDepth, saved.historyDays, saved.includeSessionFolders],
+            [draft.roots, draft.scanDepth, draft.historyDays, draft.includeSessionFolders, draft.cloneRoot],
+            [saved.roots, saved.scanDepth, saved.historyDays, saved.includeSessionFolders, saved.cloneRoot],
           ),
         },
         { id: "authors", label: "自分のコミット", dirty: !same(draft.authorEmails, saved.authorEmails) },
         { id: "accounts", label: "アカウント", dirty: !same(draft.accounts, saved.accounts) },
         {
-          id: "other",
-          label: "表示・その他",
-          dirty:
-            extraDirty() ||
-            !same(
-              [draft.cloneRoot, draft.claudeDir, draft.sessionvaultPath, draft.externalTools],
-              [saved.cloneRoot, saved.claudeDir, saved.sessionvaultPath, saved.externalTools],
-            ),
+          id: "claude",
+          label: "Claude のログ",
+          dirty: retentionDirty() ||!same([draft.claudeDir, draft.sessionvaultPath], [saved.claudeDir, saved.sessionvaultPath]),
         },
+        { id: "tools", label: "外部ツール", dirty: !same(draft.externalTools, saved.externalTools) },
+        { id: "display", label: "表示・自動更新", dirty: prefsDirty },
         { id: "hidden", label: "非表示", count: draft.hidden.length, dirty: !same(draft.hidden, saved.hidden) },
         { id: "errors", label: "問題", count: app.snapshot?.errors.length ?? 0, dirty: false },
       ] as { id: SettingsTab; label: string; count?: number; dirty: boolean }[]
@@ -291,7 +306,7 @@
     <span class="spacer"></span>
     <button onclick={revert} disabled={!dirty || saving}>元に戻す</button>
     <button class="primary" onclick={save} disabled={!dirty || saving}>
-      {saving ? "保存しています…" : configDirty || !dirty ? "保存して更新" : "保存"}
+      {saving ? "保存しています…" : localChanged || accountsChanged ? "保存して更新" : "保存"}
     </button>
   </div>
 
@@ -330,6 +345,11 @@
           <input type="checkbox" bind:checked={draft.includeSessionFolders} />
           Claude のセッションで使ったフォルダも、git リポジトリなら対象にする (探す場所の外でも)
         </label>
+        <label for="clone-root">クローン先の親フォルダ</label>
+        <div class="inline">
+          <input id="clone-root" type="text" class="mono grow" bind:value={draft.cloneRoot} placeholder="空なら探す場所の 1 つ目" />
+          <button onclick={pickCloneRoot}>参照</button>
+        </div>
       </div>
     </section>
     {/if}
@@ -488,15 +508,10 @@
     </section>
     {/if}
 
-    {#if tab === "other"}
+    {#if tab === "claude"}
     <section class="panel card">
-      <h2>その他</h2>
+      <h2>Claude のログとバックアップ</h2>
       <div class="grid">
-        <label for="clone-root">クローン先の親フォルダ</label>
-        <div class="inline">
-          <input id="clone-root" type="text" class="mono grow" bind:value={draft.cloneRoot} placeholder="空なら探す場所の 1 つ目" />
-          <button onclick={pickCloneRoot}>参照</button>
-        </div>
         <label for="claude-dir">Claude のログの場所</label>
         <input id="claude-dir" type="text" class="mono" bind:value={draft.claudeDir} placeholder="空なら %USERPROFILE%\.claude\projects" />
         <label for="sessionvault-path">SessionVault の場所</label>
@@ -512,7 +527,9 @@
         (Python 3.10 以上が要ります)。
       </p>
     </section>
+    {/if}
 
+    {#if tab === "tools"}
     <section class="panel card">
       <h2>外部ツール</h2>
       <p class="note">
@@ -539,7 +556,9 @@
       {/each}
       <button onclick={addTool}>ツールを追加</button>
     </section>
+    {/if}
 
+    {#if tab === "claude"}
     <section class="panel card">
       <h2>Claude Code のログの保存期間</h2>
       <p class="note">
@@ -573,9 +592,11 @@
         <p class="muted">読み込んでいます…</p>
       {/if}
     </section>
+    {/if}
 
+    {#if tab === "display"}
     <section class="panel card">
-      <h2>表示 <span class="muted small">(この PC だけ)</span></h2>
+      <h2>表示と自動更新 <span class="muted small">(この PC だけ)</span></h2>
       <div class="inline">
         <span class="muted">テーマ</span>
         <div class="segmented" role="group" aria-label="テーマ">
