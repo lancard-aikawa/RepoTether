@@ -328,7 +328,7 @@
         {#each draft.roots as r, i (r)}
           <li>
             <span class="mono grow">{r}</span>
-            <button class="ghost" onclick={() => draft.roots.splice(i, 1)}>外す</button>
+            <button onclick={() => draft.roots.splice(i, 1)}>外す</button>
           </li>
         {:else}
           <li class="muted">まだありません</li>
@@ -362,7 +362,7 @@
         {#each draft.authorEmails as e, i (e)}
           <li>
             <span class="mono grow">{e}</span>
-            <button class="ghost" onclick={() => draft.authorEmails.splice(i, 1)}>外す</button>
+            <button onclick={() => draft.authorEmails.splice(i, 1)}>外す</button>
           </li>
         {/each}
       </ul>
@@ -421,7 +421,7 @@
             <span class="muted">{a.kind}</span>
             <span class="spacer"></span>
             <label class="check"><input type="checkbox" bind:checked={a.enabled} /> 使う</label>
-            <button class="ghost" onclick={() => draft.accounts.splice(i, 1)}>削除</button>
+            <button onclick={() => draft.accounts.splice(i, 1)}>削除</button>
           </div>
           <div class="grid">
             <label for="label-{a.id}">表示名</label>
@@ -466,12 +466,12 @@
               <div class="inline">
                 <span class="badge good">{api.secretStoreName}に保存済み</span>
                 <button onclick={() => replacing.add(a.id)}>入れ直す</button>
-                <button class="ghost" onclick={() => (a.clearToken = true)}>消す</button>
+                <button onclick={() => (a.clearToken = true)}>消す</button>
               </div>
             {:else if a.clearToken}
               <div class="inline">
                 <span class="badge mid">保存すると消します</span>
-                <button class="ghost" onclick={() => (a.clearToken = false)}>やめる</button>
+                <button onclick={() => (a.clearToken = false)}>やめる</button>
               </div>
             {:else}
               <div class="inline">
@@ -484,14 +484,14 @@
                   bind:value={a.token}
                 />
                 {#if replacing.has(a.id)}
-                  <button class="ghost" onclick={() => (replacing.delete(a.id), (a.token = ""))}>やめる</button>
+                  <button onclick={() => (replacing.delete(a.id), (a.token = ""))}>やめる</button>
                 {/if}
               </div>
             {/if}
             <span class="muted">{api.secretStoreName}での名前</span>
             <div class="inline">
               <code class="mono">RepoTether:{a.id}</code>
-              <button class="ghost" onclick={() => copy(`RepoTether:${a.id}`)}>コピー</button>
+              <button onclick={() => copy(`RepoTether:${a.id}`)}>コピー</button>
             </div>
             {/if}
           </div>
@@ -542,7 +542,7 @@
             <label for="tool-label-{t.id}">名前</label>
             <div class="inline">
               <input id="tool-label-{t.id}" type="text" class="grow" placeholder="ボタンに出す名前" bind:value={t.label} />
-              <button class="ghost" onclick={() => draft.externalTools.splice(i, 1)}>削除</button>
+              <button onclick={() => draft.externalTools.splice(i, 1)}>削除</button>
             </div>
             <label for="tool-command-{t.id}">プログラム</label>
             <div class="inline">
@@ -676,7 +676,7 @@
           {#each hiddenRows as h, i (h.key)}
             <li>
               <span class="grow">{h.name} <span class="mono muted small">{h.path ?? h.key}</span></span>
-              <button class="ghost" onclick={() => draft.hidden.splice(i, 1)}>戻す</button>
+              <button onclick={() => draft.hidden.splice(i, 1)}>戻す</button>
             </li>
           {/each}
         </ul>
