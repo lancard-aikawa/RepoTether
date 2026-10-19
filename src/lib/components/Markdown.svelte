@@ -5,6 +5,7 @@
   import { marked } from "marked";
   import DOMPurify from "dompurify";
   import * as api from "$lib/api";
+  import { imagePlan } from "$lib/mdimages";
   import { errorText, toast } from "$lib/store.svelte";
 
   let {
@@ -18,6 +19,11 @@
 
   const isHttp = (u: string) => /^https?:\/\//i.test(u);
 
+  // 外の画像は、押すまで読み込まない (理由は mdimages.ts)。押したら、この文書の画像をまとめて出す。
+  // 別の文書に変わったら、また押すまで読み込まない
+  let imagesShownFor = $state<string | null>(null);
+  const imagesAllowed = $derived(imagesShownFor === source);
+
   const html = $derived.by(() => {
     const raw = marked.parse(source, { async: false, gfm: true }) as string;
     const clean = DOMPurify.sanitize(raw, {
@@ -27,11 +33,27 @@
     // 画像とリンクの行き先を整える (http(s) 以外は落とす)
     const doc = new DOMParser().parseFromString(`<div>${clean}</div>`, "text/html");
     for (const img of doc.querySelectorAll("img")) {
-      const src = img.getAttribute("src") ?? "";
-      const url = isHttp(src) ? src : resolve(src, true);
-      if (url) img.setAttribute("src", url);
-      else img.replaceWith(doc.createTextNode(img.getAttribute("alt") ?? ""));
+      const plan = imagePlan(img.getAttribute("src") ?? "", (rel) => resolve(rel, true), imagesAllowed);
+      const alt = img.getAttribute("alt") ?? "";
+      if (plan.kind === "show") {
+        img.setAttribute("src", plan.url);
+        // 幅を変えて何度も取りに行かせない
+        img.removeAttribute("srcset");
+      } else if (plan.kind === "ask") {
+        // 無害化のあとで自分で作る要素なので、button でよい (中身は文字として入れる)
+        const b = doc.createElement("button");
+        b.setAttribute("type", "button");
+        b.setAttribute("class", "img-ask");
+        b.setAttribute("data-img-ask", "");
+        b.setAttribute("title", `${plan.url}\n押すと、この文書の画像を読み込みます`);
+        b.textContent = `画像を表示: ${alt ? `${alt} ` : ""}(${plan.host})`;
+        img.replaceWith(b);
+      } else {
+        img.replaceWith(doc.createTextNode(alt));
+      }
     }
+    // <picture> の <source> など、img のほかに画像を取りに行くものは落とす
+    for (const s of doc.querySelectorAll("source, video, audio, track")) s.remove();
     for (const a of doc.querySelectorAll("a")) {
       const href = a.getAttribute("href") ?? "";
       const url = href.startsWith("#") ? href : isHttp(href) ? href : resolve(href, false);
@@ -44,6 +66,10 @@
 
   /** リンクはアプリ内では開かず、ブラウザへ渡す */
   async function onClick(e: MouseEvent) {
+    if ((e.target as HTMLElement).closest("[data-img-ask]")) {
+      imagesShownFor = source;
+      return;
+    }
     const a = (e.target as HTMLElement).closest("a");
     if (!a) return;
     e.preventDefault();
@@ -165,6 +191,38 @@
 
   .md :global(img) {
     max-width: 100%;
+  }
+
+  /* 押すまで読み込まない画像の代わり。押せるものなので、枠と塗り・乗せたときの変化・指のカーソルを付ける */
+  .md :global(.img-ask) {
+    font: inherit;
+    font-size: 12px;
+    color: var(--ink-2);
+    background: var(--surface-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin: 1px 0;
+    cursor: pointer;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+
+  .md :global(.img-ask:hover) {
+    background: var(--accent-wash);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .md :global(.img-ask:active) {
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+
+  .md :global(.img-ask:focus-visible) {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
   }
 
   .md :global(hr) {

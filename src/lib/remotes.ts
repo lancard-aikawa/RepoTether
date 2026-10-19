@@ -35,6 +35,24 @@ function hostOf(url: string): string | null {
   }
 }
 
+/**
+ * アカウントの URL が暗号化なし (http://) なら、そのホスト名。https や、この PC 自身 (localhost) なら null。
+ * 一覧を取るたびにトークンをこの URL へ送るので、http:// だと同じネットワークから読める。設定の画面で知らせる
+ */
+export function plainHttpHost(baseUrl: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(baseUrl.trim());
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:") return null;
+  const h = u.hostname.toLowerCase();
+  // この PC の中だけの通信は、外から読めない
+  if (h === "localhost" || h.endsWith(".localhost") || h === "[::1]" || /^127(\.\d{1,3}){3}$/.test(h)) return null;
+  return u.host;
+}
+
 /** ホスト名からサービスを決める。設定のアカウントに登録したサーバーを優先する */
 export function kindOf(host: string, cfg: Config | null): { kind: RemoteKind; label: string } {
   for (const a of cfg?.accounts ?? []) {

@@ -1,7 +1,23 @@
 // リモートの表示 (src/lib/remotes.ts) のテスト。`pnpm test` で実行する
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { repoPathOf, webUrlOf } from "../src/lib/remotes.ts";
+import { plainHttpHost, repoPathOf, webUrlOf } from "../src/lib/remotes.ts";
+
+test("plainHttpHost: 暗号化なし (http://) で外へ出る URL だけを知らせる", () => {
+  assert.equal(plainHttpHost("http://gogs.example.com/"), "gogs.example.com");
+  assert.equal(plainHttpHost(" http://192.168.1.10:3000 "), "192.168.1.10:3000");
+  assert.equal(plainHttpHost("HTTP://Git.Example.com/api/v3"), "git.example.com");
+  // https と、空 (GitHub の既定)・書きかけは知らせない
+  assert.equal(plainHttpHost("https://git.example.com"), null);
+  assert.equal(plainHttpHost(""), null);
+  assert.equal(plainHttpHost("git.example.com"), null);
+  // この PC の中だけの通信は知らせない
+  for (const u of ["http://localhost:3000", "http://127.0.0.1:3000/", "http://[::1]:3000", "http://gogs.localhost"]) {
+    assert.equal(plainHttpHost(u), null, u);
+  }
+  // 127 で始まるだけの名前は別のホスト
+  assert.equal(plainHttpHost("http://127.example.com"), "127.example.com");
+});
 
 test("repoPathOf: いろいろな形の URL から「所有者/リポジトリ名」を大文字小文字のまま取り出す", () => {
   assert.equal(repoPathOf("https://github.com/lancard-aikawa/LPortMan.git"), "lancard-aikawa/LPortMan");

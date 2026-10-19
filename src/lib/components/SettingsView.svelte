@@ -5,6 +5,7 @@
   import { emailCandidates } from "$lib/derive";
   import type { Account, AccountKind, Config, ExternalTool } from "$lib/types";
   import * as api from "$lib/api";
+  import { plainHttpHost } from "$lib/remotes";
   import {
     app,
     applyTheme,
@@ -434,6 +435,13 @@
               placeholder={a.kind === "github" ? "空なら https://api.github.com" : "https://git.example.com"}
               bind:value={a.baseUrl}
             />
+            {#if plainHttpHost(a.baseUrl)}
+              <span></span>
+              <p class="note plain-http">
+                この URL は暗号化なし (http://) です。一覧を取るたびに、トークンが {plainHttpHost(a.baseUrl)} へそのまま送られ、同じネットワークから読めます。
+                サーバーが https に対応していれば、https:// にしてください。
+              </p>
+            {/if}
             {#if a.kind === "github"}
               <span class="muted">認証</span>
               <div class="inline">
@@ -866,6 +874,10 @@
     font-size: 12px;
     color: var(--ink-2);
     margin: 0;
+  }
+
+  .note.plain-http {
+    color: var(--st-high);
   }
 
   .gh-error {
