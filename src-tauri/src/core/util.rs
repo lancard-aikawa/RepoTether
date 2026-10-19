@@ -16,11 +16,17 @@ pub fn hide_window(cmd: &mut Command) -> &mut Command {
     cmd
 }
 
+/// リポジトリの中で git を動かすときに必ず付ける設定。
+/// core.fsmonitor はリポジトリの中の設定 (.git/config) に書けて、書かれたコマンドを git status などが動かす。
+/// zip を展開したフォルダのように .git ごと人から来たリポジトリでは他人が書けるので、使わないと決めておく
+pub const GIT_SAFE_CONFIG: &[&str] = &["-c", "core.fsmonitor=false"];
+
 /// `git -C <dir> <args>` を実行して標準出力を返す。失敗時は標準エラーを返す。
 pub fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let mut cmd = Command::new("git");
     cmd.arg("-C")
         .arg(dir)
+        .args(GIT_SAFE_CONFIG)
         .args(["-c", "core.quotepath=false", "-c", "color.ui=never"])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")

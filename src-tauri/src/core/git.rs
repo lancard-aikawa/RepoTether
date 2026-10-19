@@ -350,6 +350,7 @@ pub fn fetch(path: &Path) -> Result<(), String> {
     let mut cmd = std::process::Command::new("git");
     cmd.arg("-C")
         .arg(path)
+        .args(util::GIT_SAFE_CONFIG)
         .args(["-c", "credential.interactive=false", "fetch", "--all", "--prune", "--quiet"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "never")
@@ -440,6 +441,7 @@ pub fn pull(path: &Path) -> Result<PullResult, String> {
         let mut cmd = std::process::Command::new("git");
         cmd.arg("-C")
             .arg(path)
+            .args(util::GIT_SAFE_CONFIG)
             .args(args)
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("LC_ALL", "C")
@@ -670,6 +672,40 @@ mod stamp_tests {
         run(&b, &["checkout", "-q", "--detach"]);
         let err = pull(&b).unwrap_err();
         assert!(err.starts_with("ブランチにいません"), "{err}");
+    }
+
+    /// リポジトリの中の設定 (.git/config) の core.fsmonitor に書かれたコマンドを、取り込みと pull で動かさないか。
+    /// zip を展開したフォルダなど、.git ごと人から来たリポジトリでは、この設定を他人が書ける
+    #[test]
+    fn does_not_run_fsmonitor_from_repo_config() {
+        let root = std::env::temp_dir().join("repotether-fsmonitor-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let remote = root.join("remote.git");
+        let work = root.join("work");
+        run(&root, &["init", "-q", "--bare", remote.to_str().unwrap()]);
+        run(&root, &["init", "-q", work.to_str().unwrap()]);
+        std::fs::write(work.join("f.txt"), "1").unwrap();
+        run(&work, &["add", "f.txt"]);
+        run(&work, &["commit", "-q", "-m", "a"]);
+        run(&work, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        run(&work, &["push", "-q", "-u", "origin", "main"]);
+
+        let marker = root.join("marker.txt");
+        let hook = format!("echo ran > '{}' #", marker.to_string_lossy().replace('\\', "/"));
+        run(&work, &["config", "core.fsmonitor", &hook]);
+        // この設定が本当に動くものか (動かないなら、下の検査は何も確かめていない)
+        run(&work, &["status", "--porcelain"]);
+        assert!(marker.is_file(), "core.fsmonitor のコマンドが動かない環境なので検査にならない");
+        std::fs::remove_file(&marker).unwrap();
+
+        let (repo, _) = inspect(&work, 30);
+        assert_eq!(repo.error, None);
+        assert!(!marker.exists(), "取り込みで core.fsmonitor のコマンドが動いた");
+        log_page(&work, "x", 0, 5, &[]).unwrap();
+        fetch(&work).unwrap();
+        pull(&work).unwrap();
+        assert!(!marker.exists(), "fetch / pull で core.fsmonitor のコマンドが動いた");
     }
 
     /// 標準エラーにたくさん書く子でも、パイプが詰まって止まらないか (読みながら待つ)

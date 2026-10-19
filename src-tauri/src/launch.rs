@@ -213,25 +213,36 @@ mod windows {
         }
     }
 
+    /// cmd に渡す行。cmd は PATH より先にカレントフォルダを探すので、そのままだと、人のリポジトリに
+    /// claude.cmd (.bat / .exe) があればそちらが動く。NoDefaultCurrentDirectoryInExePath を立てている間は
+    /// カレントフォルダを探さない。コマンドが終わったら消して、残った窓はふだんどおりに戻す。
+    /// 環境変数で渡さず行の中に書くのは、Windows Terminal が動いている窓に引き継ぐと、こちらの環境が届かないから
+    pub(super) fn cmd_line(line: &str) -> String {
+        const VAR: &str = "NoDefaultCurrentDirectoryInExePath";
+        // "=1" と "&&" の間に空白を入れない (入れると値が "1 " になる)
+        format!("set {VAR}=1&& {line} & set {VAR}=")
+    }
+
     /// 選んだ端末で dir を開き、その中でコマンドを動かす (終わっても窓は残す)。
     /// program と args は safe_args を通った英数字・ハイフンだけ
     pub fn terminal_run(dir: &Path, kind: &str, program: &str, args: &[&str]) -> Result<(), String> {
         let line = safe_args(&[&[program][..], args].concat())?;
+        let for_cmd = cmd_line(&line);
         match kind {
             "" | "wt" => {
                 let mut wt = Command::new("wt.exe");
-                wt.arg("-d").arg(dir).args(["cmd", "/K", &line]);
+                wt.arg("-d").arg(dir).args(["cmd", "/K", &for_cmd]);
                 if clean_env(&mut wt).spawn().is_ok() {
                     return Ok(());
                 }
                 if kind == "wt" {
                     return Err("Windows Terminal を起動できません".into());
                 }
-                console("cmd.exe", &["/K", &line], dir)
+                console("cmd.exe", &["/K", &for_cmd], dir)
             }
             "pwsh" => console("pwsh.exe", &["-NoExit", "-Command", &line], dir),
             "powershell" => console("powershell.exe", &["-NoExit", "-Command", &line], dir),
-            "cmd" => console("cmd.exe", &["/K", &line], dir),
+            "cmd" => console("cmd.exe", &["/K", &for_cmd], dir),
             "gitbash" => {
                 let bash = git_bash()
                     .and_then(|g| g.parent().map(|p| p.join("bin").join("bash.exe")))
@@ -248,7 +259,7 @@ mod windows {
                 )
             }
             // WSL の中の claude は Windows 側のセッションを知らないので、コマンドプロンプトで動かす
-            "wsl" => console("cmd.exe", &["/K", &line], dir),
+            "wsl" => console("cmd.exe", &["/K", &for_cmd], dir),
             k => Err(format!("未対応の端末です: {k}")),
         }
     }
@@ -404,6 +415,47 @@ mod terminal_tests {
         assert!(ids.contains(&"powershell") && ids.contains(&"cmd"));
         // 決まった種類以外は開かない
         assert!(terminal(std::path::Path::new("C:\\"), "calc").is_err());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod cmd_line_tests {
+    use super::*;
+
+    /// フォルダの中に同じ名前の .cmd があっても、cmd に渡す行ではそれを動かさないか。
+    /// cmd は PATH より先にカレントフォルダを探すので、人のリポジトリに claude.cmd があると、そちらが動く
+    #[test]
+    fn cmd_does_not_run_a_program_planted_in_the_folder() {
+        let dir = std::env::temp_dir().join("repotether-cmd-line-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // PATH には無い名前にする (本物が動かないように)
+        let name = "repotether-planted-tool";
+        std::fs::write(dir.join(format!("{name}.cmd")), "@echo ran> \"%~dp0marker.txt\"\r\n").unwrap();
+        let marker = dir.join("marker.txt");
+        let run = |line: &str| {
+            Command::new("cmd.exe")
+                .args(["/d", "/c", line])
+                .current_dir(&dir)
+                // Claude Code の中のテストではこの変数が入っているので、ふつうの起動に合わせて外す
+                .env_remove("NoDefaultCurrentDirectoryInExePath")
+                .output()
+                .unwrap()
+        };
+
+        // そのまま渡すと動く (動かないなら、下の検査は何も確かめていない)
+        run(&format!("{name} -r abc"));
+        assert!(marker.is_file(), "フォルダの中の .cmd が動かない環境なので検査にならない");
+        std::fs::remove_file(&marker).unwrap();
+
+        run(&cmd_line(&format!("{name} -r abc")));
+        assert!(!marker.exists(), "フォルダの中の .cmd が動いた");
+
+        // 終わったあとは元に戻す (窓に残って打つコマンドは、ふだんどおりフォルダの中のものも動く)
+        // "set 変数=" のすぐ後ろで区切る (空白をはさむと、消えずに空白が値になる)
+        run(&format!("{}& {name}", cmd_line("ver")));
+        assert!(marker.is_file(), "コマンドのあとも、フォルダの中を探さないままになっている");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
