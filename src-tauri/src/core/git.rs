@@ -46,14 +46,7 @@ fn ref_dir_mtimes(dir: &Path, depth: usize, out: &mut Vec<String>) {
 /// 前回と同じなら、その間に git の操作は無かったとみなせる (作業ツリーのファイルだけの変更は拾えない)
 pub fn stamp(path: &Path) -> Option<String> {
     let dir = discover::git_dir(path)?;
-    // worktree では、ブランチなどは commondir が指す本体の .git にある
-    let common = std::fs::read_to_string(dir.join("commondir"))
-        .ok()
-        .map(|s| {
-            let p = std::path::PathBuf::from(s.trim());
-            if p.is_absolute() { p } else { dir.join(p) }
-        })
-        .unwrap_or_else(|| dir.clone());
+    let common = discover::common_dir(&dir);
     let mut parts: Vec<String> = STAMP_FILES.iter().map(|f| mtime_ns(&dir.join(f))).collect();
     parts.extend(STAMP_COMMON_FILES.iter().map(|f| mtime_ns(&common.join(f))));
     ref_dir_mtimes(&common.join("refs"), 0, &mut parts);
@@ -706,6 +699,65 @@ mod stamp_tests {
         fetch(&work).unwrap();
         pull(&work).unwrap();
         assert!(!marker.exists(), "fetch / pull で core.fsmonitor のコマンドが動いた");
+    }
+
+    /// リポジトリの中の設定で決めた filter (.gitattributes の filter=<名前> と filter.<名前>.clean / .process) の
+    /// コマンドを、取り込みで動かさないか。名前に = がある・include.path で別のファイルから持ち込む・
+    /// あとから持ち込んだファイルに書き足す、のどれでも
+    #[test]
+    fn does_not_run_filters_from_repo_config() {
+        let root = std::env::temp_dir().join("repotether-filter-test");
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let work = root.join("work");
+        run(&root, &["init", "-q", work.to_str().unwrap()]);
+        std::fs::write(work.join("a.txt"), "a\n").unwrap();
+        std::fs::write(work.join("b.dat"), "b\n").unwrap();
+        std::fs::write(work.join(".gitattributes"), "*.txt filter=x=y\n*.dat filter=inc\n").unwrap();
+        run(&work, &["add", "."]);
+        run(&work, &["commit", "-q", "-m", "a"]);
+
+        let slash = |p: &Path| p.to_string_lossy().replace('\\', "/");
+        let marker = root.join("marker.txt");
+        let ran = || {
+            let r = marker.exists();
+            let _ = std::fs::remove_file(&marker);
+            r
+        };
+        // 展開したばかりのように、git status が中身を読み直すようにする
+        let touch = || {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            for f in ["a.txt", "b.dat"] {
+                std::fs::write(work.join(f), std::fs::read(work.join(f)).unwrap()).unwrap();
+            }
+        };
+        run(&work, &["config", "filter.x=y.clean", &format!("echo x > '{}'; cat", slash(&marker))]);
+        // 持ち込むファイルは、はじめは何も決めていない
+        let extra = root.join("extra.cfg");
+        std::fs::write(&extra, "[core]\n\tbare = false\n").unwrap();
+        run(&work, &["config", "include.path", &slash(&extra)]);
+
+        // この設定が本当に動くものか (動かないなら、下の検査は何も確かめていない)
+        touch();
+        run(&work, &["status", "--porcelain"]);
+        assert!(ran(), "filter のコマンドが動かない環境なので検査にならない");
+
+        touch();
+        let (repo, _) = inspect(&work, 30);
+        assert_eq!(repo.error, None);
+        assert!(!ran(), "取り込みで filter.x=y.clean が動いた");
+
+        // 読んだあとで、持ち込んだファイルに filter を書き足す (覚えた結果を使い回さないか)
+        std::fs::write(&extra, format!("[filter \"inc\"]\n\tprocess = sh -c 'echo x > \"{}\"; exit 1'\n\trequired = true\n", slash(&marker))).unwrap();
+        touch();
+        // required の filter が失敗するので、git status 自体は失敗してよい
+        let _ = std::process::Command::new("git").arg("-C").arg(&work).args(["status", "--porcelain"]).output().unwrap();
+        assert!(ran(), "持ち込んだ filter が動かない環境なので検査にならない");
+        touch();
+        let (repo, _) = inspect(&work, 30);
+        assert_eq!(repo.error, None, "required の filter を外さずに止まった");
+        log_page(&work, "x", 0, 5, &[]).unwrap();
+        assert!(!ran(), "取り込みで、持ち込んだファイルの filter が動いた");
     }
 
     /// 標準エラーにたくさん書く子でも、パイプが詰まって止まらないか (読みながら待つ)

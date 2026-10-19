@@ -134,6 +134,18 @@ pub fn git_dir(repo: &Path) -> Option<PathBuf> {
     Some(if p.is_absolute() { p } else { repo.join(p) })
 }
 
+/// 共通のフォルダ。worktree では、ブランチや設定 (config) は commondir が指す本体の .git にある。
+/// worktree でなければ git_dir と同じ
+pub fn common_dir(git_dir: &Path) -> PathBuf {
+    std::fs::read_to_string(git_dir.join("commondir"))
+        .ok()
+        .map(|s| {
+            let p = PathBuf::from(s.trim());
+            if p.is_absolute() { p } else { git_dir.join(p) }
+        })
+        .unwrap_or_else(|| git_dir.to_path_buf())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
