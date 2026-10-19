@@ -186,9 +186,18 @@ mod windows {
         out
     }
 
+    /// Windows Terminal にこのフォルダを渡してよいか。wt.exe は引数の中の ; をコマンドの区切りとして読むので、
+    /// ; のあるパスを渡すと、後ろが別のコマンドとして動く ("C:\Repos\a;calc" なら calc)。
+    /// フォルダの名前は人が決められる (展開した zip、Claude のログにあるフォルダ) ので、; があれば渡さず、
+    /// ふつうのコンソール窓で開く
+    pub(super) fn wt_can_take(dir: &Path) -> bool {
+        !dir.to_string_lossy().contains(';')
+    }
+
     /// kind が空なら自動 (Windows Terminal、無ければ PowerShell)
     pub fn terminal(dir: &Path, kind: &str) -> Result<(), String> {
         match kind {
+            "" | "wt" if !wt_can_take(dir) => console("powershell.exe", &["-NoExit"], dir),
             "" => {
                 if clean_env(Command::new("wt.exe").arg("-d").arg(dir)).spawn().is_ok() {
                     return Ok(());
@@ -229,6 +238,7 @@ mod windows {
         let line = safe_args(&[&[program][..], args].concat())?;
         let for_cmd = cmd_line(&line);
         match kind {
+            "" | "wt" if !wt_can_take(dir) => console("cmd.exe", &["/K", &for_cmd], dir),
             "" | "wt" => {
                 let mut wt = Command::new("wt.exe");
                 wt.arg("-d").arg(dir).args(["cmd", "/K", &for_cmd]);
@@ -421,6 +431,15 @@ mod terminal_tests {
 #[cfg(all(test, windows))]
 mod cmd_line_tests {
     use super::*;
+
+    /// ; のあるフォルダは Windows Terminal に渡さない (後ろが別のコマンドとして動くので)
+    #[test]
+    fn folders_with_a_semicolon_do_not_go_to_windows_terminal() {
+        assert!(wt_can_take(Path::new(r"C:\Repos\My App")));
+        assert!(wt_can_take(Path::new(r"\\server\share\app")));
+        assert!(!wt_can_take(Path::new(r"C:\Repos\a;calc")));
+        assert!(!wt_can_take(Path::new(r"C:\Repos\a; calc.exe\sub")));
+    }
 
     /// フォルダの中に同じ名前の .cmd があっても、cmd に渡す行ではそれを動かさないか。
     /// cmd は PATH より先にカレントフォルダを探すので、人のリポジトリに claude.cmd があると、そちらが動く
