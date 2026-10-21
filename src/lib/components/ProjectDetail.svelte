@@ -493,6 +493,7 @@
       <button class="ghost" onclick={onclose} aria-label="閉じる">閉じる</button>
     </div>
     {#if project.path}<div class="mono muted path">{project.path}</div>{/if}
+    {#if project.languages.length}<div class="muted small">言語: {project.languages.join(" · ")}</div>{/if}
     <ProjectActions {project} />
   </div>
 

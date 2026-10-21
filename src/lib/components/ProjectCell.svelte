@@ -28,12 +28,13 @@
   /** 重い脆弱性 (緊急・高) の数。「隠す」で隠したものは数えない */
   const heavy = $derived(heavyOf(app.vulns, p.local?.id, prefs.vulnHide));
 
-  /** カーソルを乗せたときの説明: 場所・ブランチ・タグ */
+  /** カーソルを乗せたときの説明: 場所・ブランチ・言語・タグ */
   const tip = $derived(
     [
       p.name,
       p.path,
       p.local?.branch ? `ブランチ: ${p.local.branch}` : null,
+      p.languages.length ? `言語: ${p.languages.join(", ")}` : null,
       p.tags.length ? `タグ: ${p.tags.join(", ")}` : null,
       p.lastActivity ? `最新の作業: ${new Date(p.lastActivity).toLocaleString()}` : null,
     ]

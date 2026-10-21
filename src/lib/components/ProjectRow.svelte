@@ -87,6 +87,10 @@
       {#if p.local?.branch && p.local.branch !== p.local.defaultBranch}
         <span class="branch mono">{p.local.branch}</span>
       {/if}
+      {#if p.languages.length}
+        <!-- 押せない札なので枠を付けない (枠のあるリモートの札と形で分ける) -->
+        <span class="lang" title="言語 (置いてあるファイルとリモートの判定から)">{p.languages.join(" · ")}</span>
+      {/if}
       <span class="times">
         {#each timesOf(p) as t (t.kind)}
           <span
@@ -189,6 +193,11 @@
   .branch {
     font-size: 11px;
     color: var(--ink-2);
+  }
+
+  .lang {
+    font-size: 11px;
+    color: var(--muted);
   }
 
   .times {
