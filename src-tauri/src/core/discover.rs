@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 /// 中を探さないフォルダ。依存やビルド成果物で、リポジトリが置かれることはまず無い。
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     "node_modules",
     "target",
     "dist",

@@ -6,6 +6,7 @@ pub mod discover;
 pub mod gh;
 pub mod git;
 pub mod icon;
+pub mod lang;
 pub mod lockwatch;
 pub mod model;
 pub mod pagetitle;
@@ -101,7 +102,11 @@ pub fn build_local(
 
     let mut repos: Vec<LocalRepo> = vec![];
     let mut commits: Vec<Commit> = vec![];
-    for (repo, cs) in results.into_iter().chain(kept) {
+    for (mut repo, cs) in results.into_iter().chain(kept) {
+        // 前の版のキャッシュから引き継いだものは、言語をまだ調べていない
+        if repo.languages.is_none() {
+            repo.languages = Some(lang::detect(Path::new(&repo.path)));
+        }
         repos.push(repo);
         commits.extend(cs);
     }

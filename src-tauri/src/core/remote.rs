@@ -142,5 +142,6 @@ fn to_repo(account_id: &str, v: &Value) -> Option<RemoteRepo> {
         default_branch: s(v, "default_branch"),
         updated_at: s(v, "updated_at").or_else(|| s(v, "updated")),
         pushed_at: s(v, "pushed_at"),
+        language: s(v, "language"),
     })
 }

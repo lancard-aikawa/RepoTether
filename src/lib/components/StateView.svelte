@@ -73,6 +73,8 @@
   let visibility = $state<Visibility>("shown");
   let starOnly = $state(false);
   let remoteFilter = $state<RemoteFilter>("");
+  /** "" はすべて、NO_LANG は言語が分からないもの、ほかは言語の名前 */
+  let langFilter = $state("");
   let query = $state("");
   let selectedKey = $state<string | null>(null);
 
@@ -80,6 +82,13 @@
     if (!k) return true;
     if (k === "none") return p.kind === "local" && p.links.length === 0 && !p.local?.error;
     return p.links.some((l) => l.kind === k);
+  }
+
+  const NO_LANG = "#none";
+
+  function matchesLang(p: Project, l: string): boolean {
+    if (!l) return true;
+    return l === NO_LANG ? p.languages.length === 0 : p.languages.includes(l);
   }
 
   function matchesFilter(p: Project, f: Filter): boolean {
@@ -116,16 +125,30 @@
 
   const counts = $derived(
     Object.fromEntries(
-      filters.map((f) => [f.id, byVisibility.filter((p) => matchesRemote(p, remoteFilter) && matchesFilter(p, f.id)).length]),
+      filters.map((f) => [f.id, byVisibility.filter((p) => matchesRemote(p, remoteFilter) && matchesLang(p, langFilter) && matchesFilter(p, f.id)).length]),
     ) as Record<Filter, number>,
   );
 
   /** 実際に出てくるリモートの種類だけを選択肢にする */
   const remoteOptions = $derived.by(() => {
-    const base = byVisibility.filter((p) => matchesFilter(p, filter));
+    const base = byVisibility.filter((p) => matchesFilter(p, filter) && matchesLang(p, langFilter));
     return (Object.keys(remoteLabels) as Exclude<RemoteFilter, "">[])
       .map((k) => ({ id: k, label: remoteLabels[k], count: base.filter((p) => matchesRemote(p, k)).length }))
       .filter((o) => o.count > 0 || o.id === remoteFilter);
+  });
+
+  /** 実際に出てくる言語だけを、多い順に選択肢にする */
+  const langOptions = $derived.by(() => {
+    const base = byVisibility.filter((p) => matchesFilter(p, filter) && matchesRemote(p, remoteFilter));
+    const count = new Map<string, number>();
+    for (const p of base) for (const l of p.languages) count.set(l, (count.get(l) ?? 0) + 1);
+    if (langFilter && langFilter !== NO_LANG && !count.has(langFilter)) count.set(langFilter, 0);
+    const opts = [...count]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([l, n]) => ({ id: l, label: l, count: n }));
+    const none = base.filter((p) => p.languages.length === 0).length;
+    if (none > 0 || langFilter === NO_LANG) opts.push({ id: NO_LANG, label: "分からないもの", count: none });
+    return opts;
   });
 
   const hiddenCount = $derived(projects.filter((p) => p.hidden).length);
@@ -150,7 +173,9 @@
 
   const shown = $derived.by(() => {
     const q = searchKey(query.trim());
-    let xs = byVisibility.filter((p) => matchesFilter(p, filter) && matchesRemote(p, remoteFilter));
+    let xs = byVisibility.filter(
+      (p) => matchesFilter(p, filter) && matchesRemote(p, remoteFilter) && matchesLang(p, langFilter),
+    );
     if (q) {
       const hit = (s: string | null | undefined) => !!s && searchKey(s).includes(q);
       xs = xs.filter(
@@ -158,6 +183,7 @@
           hit(p.name) ||
           hit(p.path) ||
           p.tags.some(hit) ||
+          p.languages.some(hit) ||
           p.remotes.some((r) => hit(r.fullName)) ||
           p.links.some((l) => hit(l.label) || hit(l.url)),
       );
@@ -167,7 +193,7 @@
 
   /** 既定以外の絞り込みをしているか (検索も含む) */
   const filtering = $derived(
-    filter !== "all" || remoteFilter !== "" || visibility !== "shown" || starOnly || query.trim() !== "",
+    filter !== "all" || remoteFilter !== "" || langFilter !== "" || visibility !== "shown" || starOnly || query.trim() !== "",
   );
   const starredCount = $derived(projects.filter((p) => p.starred && !p.hidden).length);
 
@@ -260,6 +286,7 @@
   function clearFilters() {
     filter = "all";
     remoteFilter = "";
+    langFilter = "";
     visibility = "shown";
     starOnly = false;
     query = "";
@@ -603,7 +630,7 @@
     <div class="bar-row">
       <span class="caption">検索</span>
       <div class="controls">
-        <input class="search" type="search" placeholder="名前・パス・タグで検索" bind:value={query} aria-label="検索" />
+        <input class="search" type="search" placeholder="名前・パス・タグ・言語で検索" bind:value={query} aria-label="検索" />
         <span class="result muted num">{shown.length} / {projects.length} 件</span>
       </div>
     </div>
@@ -673,6 +700,15 @@
           <select bind:value={remoteFilter} class:active={remoteFilter !== ""}>
             <option value="">すべて</option>
             {#each remoteOptions as o (o.id)}
+              <option value={o.id}>{o.label} ({o.count})</option>
+            {/each}
+          </select>
+        </label>
+        <label class="field" title="置いてあるファイル (composer.json など) と、リモートが判定した言語で絞ります">
+          <span class="muted">言語</span>
+          <select bind:value={langFilter} class:active={langFilter !== ""}>
+            <option value="">すべて</option>
+            {#each langOptions as o (o.id)}
               <option value={o.id}>{o.label} ({o.count})</option>
             {/each}
           </select>

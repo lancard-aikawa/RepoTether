@@ -32,6 +32,8 @@ export interface Project {
   path: string | null;
   local: LocalRepo | null;
   remotes: RemoteRepo[];
+  /** 言語 (ローカルで見当を付けたもの + リモートが判定したもの)。主なものが先。分からなければ空 */
+  languages: string[];
   /** リモート (GitHub / Gogs などの種類と、ブラウザで開く URL)。無ければ空 */
   links: RemoteLink[];
   sessions: Session[];
@@ -114,6 +116,7 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           path: repo.path,
           local: repo,
           remotes,
+          languages: languagesOf(repo.languages ?? [], remotes),
           links: linksOfLocal(repo, remotes, cfg),
           sessions,
           commits,
@@ -148,6 +151,7 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           path: null,
           local: null,
           remotes: [r],
+          languages: languagesOf([], [r]),
           links: [linkOfRemote(r, cfg)],
           sessions: [],
           commits: [],
@@ -187,6 +191,7 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
           path,
           local: null,
           remotes: [],
+          languages: [],
           links: [],
           sessions: sortSessions(sessions),
           commits: [],
@@ -208,6 +213,13 @@ export function buildProjects(snap: Snapshot, cfg: Config, opt: BuildOptions): P
   }
 
   return projects;
+}
+
+/** ローカルで見当を付けたものを先に、リモートの判定を後ろに (重複は除く) */
+export function languagesOf(local: string[], remotes: RemoteRepo[]): string[] {
+  const out = [...local];
+  for (const r of remotes) if (r.language && !out.includes(r.language)) out.push(r.language);
+  return out;
 }
 
 function finish(p: Project, opt: BuildOptions): Project {

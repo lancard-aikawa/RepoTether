@@ -31,6 +31,8 @@ export interface LocalRepo {
   lastCommitAt: string | null;
   lastFetchAt: string | null;
   error: string | null;
+  /** 置いてあるファイルから見当を付けた言語 (GitHub の表記)。主なものが先。null は未調査 */
+  languages?: string[] | null;
 }
 
 export interface Remote {
@@ -117,6 +119,8 @@ export interface RemoteRepo {
   defaultBranch: string | null;
   updatedAt: string | null;
   pushedAt: string | null;
+  /** リモートが判定した主な言語 (Gogs は返さない) */
+  language?: string | null;
 }
 
 export interface SourceError {

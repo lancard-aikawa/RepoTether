@@ -57,6 +57,10 @@ pub struct LocalRepo {
     pub inspected_at: Option<String>,
     /// 読んだときの .git の中の主なファイルの更新時刻。変わっていれば git の操作があったとみなして読み直す
     pub git_stamp: Option<String>,
+    /// 置いてあるファイルから見当を付けた言語 (GitHub の表記)。主なものが先。
+    /// None はまだ調べていない (前の版のキャッシュから引き継いだもの)
+    #[serde(default)]
+    pub languages: Option<Vec<String>>,
 }
 
 /// 更新でどのリポジトリを git から読み直すか。読み直さないものは前回の結果を引き継ぐ
@@ -187,6 +191,9 @@ pub struct RemoteRepo {
     pub default_branch: Option<String>,
     pub updated_at: Option<String>,
     pub pushed_at: Option<String>,
+    /// リモートが判定した主な言語 (GitHub / Gitea。Gogs は返さない)
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

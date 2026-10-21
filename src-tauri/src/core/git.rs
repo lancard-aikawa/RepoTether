@@ -65,6 +65,8 @@ pub fn inspect(path: &Path, history_days: u32) -> (LocalRepo, Vec<Commit>) {
         // 読む前に取る。読んでいる間に変わっても、次の回で違いに気付けるように
         git_stamp: stamp(path),
         inspected_at: Some(chrono::Local::now().to_rfc3339()),
+        // ファイルを見るだけなので、git が読めないリポジトリでも調べる
+        languages: Some(super::lang::detect(path)),
         ..Default::default()
     };
 
