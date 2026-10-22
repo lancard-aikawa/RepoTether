@@ -40,6 +40,11 @@ pub struct Config {
     pub external_tools: Vec<ExternalTool>,
     /// プロジェクトの関連ページ (サービスの管理画面など)。キーは hidden と同じ
     pub links: BTreeMap<String, Vec<Link>>,
+    /// 社員向けの脆弱性の一覧に載せる場所。ホスト (gogs.example.com) かホスト/所有者 (github.com/example)。
+    /// リモートがここに当てはまるリポジトリを、当てはまった文字を見出しにして載せる (LockWatch の targets.json の share)
+    pub share_locations: Vec<String>,
+    /// 廃止の印を付けたプロジェクト (LocalRepo.id)。更新しないと決めたもの。LockWatch で照合しない
+    pub retired: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -129,6 +134,8 @@ impl Default for Config {
             lockwatch_path: None,
             external_tools: vec![],
             links: BTreeMap::new(),
+            share_locations: vec![],
+            retired: vec![],
         }
     }
 }

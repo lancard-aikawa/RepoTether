@@ -13,6 +13,7 @@
     refresh,
     savePrefs,
     setHidden,
+    setRetired,
     setLinks,
     setTags,
     toast,
@@ -869,9 +870,20 @@
       <section>
         <h3>
           脆弱性
-          <button class="small-btn" onclick={runScan} disabled={!!scanning || !vulns} title="LockWatch で、このリポジトリだけ照合し直す">
+          <button class="small-btn" onclick={runScan} disabled={!!scanning || !vulns || vulns.retired} title="LockWatch で、このリポジトリだけ照合し直す">
             {scanning === "checking" ? "確かめています…" : scanning === "scanning" ? "調べています…" : "今すぐ調べる"}
           </button>
+          {#if vulns && project.local}
+            {@const localId = project.local.id}
+            <button
+              class="small-btn"
+              onclick={() => setRetired(localId, !vulns.retired)}
+              title={vulns.retired
+                ? "LockWatch の照合に戻す"
+                : "更新しないと決めたプロジェクトに付ける。LockWatch で照合せず、社員向けの一覧では「廃止」の欄に名前だけ出す"}
+              >{vulns.retired ? "廃止をやめる" : "廃止にする"}</button
+            >
+          {/if}
         </h3>
         {#if unchangedSince}
           <div class="notice small">
@@ -887,8 +899,16 @@
           <p class="err small">{app.vulns.error}</p>
         {:else if !vulns}
           <p class="muted small">このリポジトリは LockWatch の対象にありません (非表示にしたものは対象外です)。</p>
+        {:else if vulns.retired}
+          <p class="small"><span class="badge low">廃止</span> 更新しないと決めたプロジェクトです。LockWatch で照合しません。</p>
+          {#if vulns.share}
+            <p class="muted small">社員向けの一覧では「{vulns.share}」の「廃止」の欄に名前だけ出ます。</p>
+          {/if}
         {:else}
           <p class="muted small">{VISIBILITY_NOTE[vulns.visibility]}</p>
+          <p class="muted small">
+            {vulns.share ? `社員向けの一覧に「${vulns.share}」として載せます。` : "社員向けの一覧には載せません (上の「脆弱性」タブの「社員向けに載せる場所」に当てはまらないため)。"}
+          </p>
           {@const lws = app.lockwatchStatus}
           {#if lws?.osvScanner.error}
             <p class="small"><span class="badge high">osv-scanner が使えません</span> {lws.osvScanner.error}</p>
@@ -948,6 +968,7 @@
                   <div class="small">
                     <button class="link mono" onclick={() => api.openUrl(`https://osv.dev/vulnerability/${encodeURIComponent(f.id)}`)} title="osv.dev で詳しく見る">{f.id}</button>
                     {#if f.fixed.length}<span class="muted">直る版</span> <span class="mono">{f.fixed.join(", ")}</span>{:else}<span class="muted">直る版なし</span>{/if}
+                    {#if f.published}<span class="muted">発行日</span> <span class="mono">{f.published.slice(0, 10)}</span>{/if}
                   </div>
                   {#if f.summary}<div class="small">{f.summary}</div>{/if}
                   <div class="muted small mono">{f.lockfile}</div>

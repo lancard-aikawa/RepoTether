@@ -152,6 +152,10 @@ export interface Config {
   externalTools: ExternalTool[];
   /** プロジェクトの設定キー (Project.prefKey) -> 関連ページ (サービスの管理画面など) */
   links: Record<string, Link[]>;
+  /** 社員向けの脆弱性の一覧に載せる場所。ホスト (gogs.example.com) かホスト/所有者 (github.com/example) */
+  shareLocations: string[];
+  /** 廃止の印を付けたプロジェクト (LocalRepo.id)。LockWatch で照合しない */
+  retired: string[];
 }
 
 export interface Link {
@@ -190,6 +194,8 @@ export interface VulnFinding {
   /** 悪意あるコードの記録 (OSV の MAL-) か */
   malicious: boolean;
   summary: string;
+  /** 脆弱性の発行日 (OSV の published)。古い LockWatch の結果では null */
+  published: string | null;
 }
 
 export interface VulnRepoResult {
@@ -224,6 +230,10 @@ export interface RepoVulns {
   result: VulnRepoResult | null;
   /** 前回から新しく出たもの [package, id] */
   new: [string, string][];
+  /** 社員向けの一覧での見出し。載せないなら null */
+  share: string | null;
+  /** 廃止 (照合しない)。廃止のものは result が null */
+  retired: boolean;
 }
 
 /** LockWatch が使える状態か (lockwatch status --json) */

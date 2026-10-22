@@ -58,8 +58,12 @@ fn write_lockwatch_targets(
     snap: &Snapshot,
 ) -> Result<Option<(core::lockwatch::Runner, core::lockwatch::Locations, Vec<(String, core::lockwatch::Target)>)>, String> {
     let Some((runner, loc)) = state.lockwatch()? else { return Ok(None) };
-    let hidden = state.config.lock().unwrap().hidden.clone();
-    let targets = core::lockwatch::build_targets(&snap.repos, &snap.remote_repos, &hidden);
+    let (hidden, share, retired) = {
+        let c = state.config.lock().unwrap();
+        (c.hidden.clone(), c.share_locations.clone(), c.retired.clone())
+    };
+    let rules = core::lockwatch::Rules { hidden: &hidden, share: &share, retired: &retired };
+    let targets = core::lockwatch::build_targets(&snap.repos, &snap.remote_repos, rules);
     let list: Vec<core::lockwatch::Target> = targets.iter().map(|(_, t)| t.clone()).collect();
     core::lockwatch::write_targets(&loc.targets, &list)?;
     Ok(Some((runner, loc, targets)))
@@ -153,6 +157,23 @@ async fn lockwatch_open_gui(app: AppHandle, path: Option<String>) -> Result<(), 
         // LockWatch の画面で場所を変えるかもしれないので、覚えている場所は捨てて次に聞き直す
         *state.lockwatch_locations.lock().unwrap() = None;
         core::lockwatch::open_gui(&core::lockwatch::resolve(&dir)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 社員向けの一覧 (LockWatch の report --share) を書いて、index.html を既定のブラウザで開く。
+/// 先に targets.json を今の一覧と設定にそろえる (載せる場所・廃止の印を変えた直後でも効くように)
+#[tauri::command]
+async fn lockwatch_share(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let snap = core::load_snapshot(&state.snapshot_path()).ok_or("まだ取り込んでいません")?;
+        let (runner, loc, _) = write_lockwatch_targets(&state, &snap)?.ok_or("LockWatch の場所が決まっていません")?;
+        let index = core::lockwatch::share_report(&runner, &loc)?;
+        // explorer / open / xdg-open にファイルを渡すと、既定のアプリ (ブラウザ) で開く
+        launch::folder(&index)?;
+        Ok(util::display_path(&index.to_string_lossy()))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -676,7 +697,8 @@ pub fn run() {
             lockwatch_status,
             lockwatch_open_gui,
             lockwatch_check,
-            lockwatch_scan
+            lockwatch_scan,
+            lockwatch_share
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -67,6 +67,8 @@ const mockConfig: Config = {
   lockwatchPath: null,
   externalTools: [],
   links: {},
+  shareLocations: [],
+  retired: [],
 };
 
 /** ブラウザ表示の確認用に、外から差し込める値 (tools/manual-shots.mjs がマニュアルの画面を撮るときに使う) */
@@ -266,6 +268,12 @@ export async function lockwatchCheck(repoId: string): Promise<VulnCheck> {
 export async function lockwatchScan(repoId: string, fresh = false): Promise<VulnReport> {
   if (!inTauri) throw new Error("ブラウザ表示では調べられません");
   return call("lockwatch_scan", { repoId, fresh });
+}
+
+/** 社員向けの一覧 (LockWatch の report --share) を書いて、ブラウザで開く。書いた index.html の場所を返す */
+export async function lockwatchShare(): Promise<string> {
+  if (!inTauri) throw new Error("ブラウザ表示では作れません");
+  return call("lockwatch_share");
 }
 
 /** ファイル選択ダイアログ。キャンセルなら null */

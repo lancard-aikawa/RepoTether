@@ -394,6 +394,16 @@ export async function setStarred(key: string, on: boolean) {
   await updateConfig({ ...app.config, starred: [...set] });
 }
 
+/** 廃止の印を付ける / 外す (key は LocalRepo.id)。LockWatch の対象 (targets.json) と結果を読み直す */
+export async function setRetired(key: string, on: boolean) {
+  if (!app.config) return;
+  const set = new Set(app.config.retired ?? []);
+  if (on) set.add(key);
+  else set.delete(key);
+  await updateConfig({ ...app.config, retired: [...set] });
+  await loadVulns();
+}
+
 /** プロジェクトを一覧から外す / 戻す */
 export async function setHidden(key: string, hidden: boolean) {
   if (!app.config) return;

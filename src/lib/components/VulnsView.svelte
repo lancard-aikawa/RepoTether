@@ -15,7 +15,7 @@
   // ---- 結果 (プロジェクトごと) ----
   type Row = {
     project: Project;
-    status: "ok" | "no-lockfile" | "error" | "none";
+    status: "ok" | "no-lockfile" | "error" | "none" | "retired";
     /** 「隠す」を除いたもの (重い順) */
     findings: VulnFinding[];
     heavy: number;
@@ -36,7 +36,7 @@
       const findings = vulnsLib.visible(vulnsLib.findingsOf(app.vulns, p.local?.id), prefs.vulnHide);
       out.push({
         project: p,
-        status: res?.status ?? "none",
+        status: v.retired ? "retired" : (res?.status ?? "none"),
         findings,
         heavy: vulnsLib.heavyCount(findings, []),
         fresh: findings.filter((f) => v.new.some(([pkg, id]) => pkg === f.package && id === f.id)).length,
@@ -167,6 +167,72 @@
     }
   }
 
+  // ---- 社員向けの一覧 (LockWatch の report --share) ----
+  // 載せる場所はこのタブの「保存」で設定に書く (LockWatch の場所と同じく、設定タブの保存とは別)
+  const savedLocations = $derived(app.config?.shareLocations ?? []);
+  let locations = $state<string[]>([...(app.config?.shareLocations ?? [])]);
+  let newLocation = $state("");
+  const locationsDirty = $derived(JSON.stringify(locations) !== JSON.stringify(savedLocations));
+  let savingLocations = $state(false);
+  let sharing = $state(false);
+
+  const norm = (s: string) => s.trim().replace(/\/+$/, "").toLowerCase();
+
+  function addLocation(raw: string) {
+    const v = raw.trim().replace(/\/+$/, "");
+    if (v && !locations.some((l) => norm(l) === norm(v))) locations.push(v);
+    newLocation = "";
+  }
+
+  /** 候補: 手元のリポジトリのリモートの、自前のサーバーのホストと、github.com の所有者 (数の多い順) */
+  const candidates = $derived.by(() => {
+    const n = new Map<string, number>();
+    for (const p of projects) {
+      for (const r of p.local?.remotes ?? []) {
+        const parts = r.key?.split("/") ?? [];
+        if (parts.length < 3) continue;
+        const loc = parts[0] === "github.com" ? `${parts[0]}/${parts[1]}` : parts[0];
+        n.set(loc, (n.get(loc) ?? 0) + 1);
+      }
+    }
+    return [...n.entries()]
+      .filter(([loc]) => !locations.some((l) => norm(l) === loc))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  });
+
+  /** 保存済みの設定での数 (LockWatch に渡した一覧から) */
+  const shareCounts = $derived.by(() => {
+    const all = Object.values(app.vulns?.byRepo ?? {}).filter((v) => v.share);
+    return { shared: all.filter((v) => !v.retired).length, retired: all.filter((v) => v.retired).length };
+  });
+
+  async function saveLocations() {
+    if (!app.config) return;
+    savingLocations = true;
+    try {
+      await updateConfig({ ...$state.snapshot(app.config), shareLocations: $state.snapshot(locations) });
+      // 一覧を LockWatch に渡し直す (share が変わる)
+      await loadVulns();
+      toast("保存しました");
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      savingLocations = false;
+    }
+  }
+
+  async function makeShare() {
+    sharing = true;
+    try {
+      const path = await api.lockwatchShare();
+      toast(`社員向けの一覧を作り、ブラウザで開きました: ${path}`);
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      sharing = false;
+    }
+  }
+
   async function copyText(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -245,7 +311,9 @@
                     {#each vulnsLib.counts(r.findings) as [sev, n] (sev)}
                       <span class="badge {vulnsLib.SEVERITY_BADGE[sev]}">{vulnsLib.SEVERITY_LABEL[sev]} {n}</span>
                     {:else}
-                      {#if r.error}
+                      {#if r.status === "retired"}
+                        <span class="badge low" title="更新しないと決めたもの。照合しません">廃止</span>
+                      {:else if r.error}
                         <span class="badge high" title={r.error}>照合できません</span>
                       {:else if r.status === "none"}
                         <span class="muted">まだ照合していません</span>
@@ -268,6 +336,58 @@
           </table>
         {/if}
       {/if}
+    </section>
+  {/if}
+
+  {#if app.vulns?.configured && !app.vulns.error}
+    <section class="panel card">
+      <h2>社員向けの一覧</h2>
+      <p class="note">
+        社内の人に見せるための脆弱性の一覧 (HTML) を、LockWatch のデータの場所の <code>share</code> フォルダに作ります。
+        載せるのは、リモートが下の場所に当てはまるリポジトリだけで、当てはまった場所ごとに分けて並べます。
+        リモートの無いもの・個人のアカウントのもの・外から取ってきたサンプルは載せません。
+        詳細パネルの「脆弱性」タブで「廃止にする」を押したものは照合せず、一覧の「廃止」の欄に名前だけ出します。
+      </p>
+      <ul class="locs">
+        {#each locations as l, i (l)}
+          <li>
+            <span class="mono grow">{l}</span>
+            <button onclick={() => locations.splice(i, 1)}>外す</button>
+          </li>
+        {:else}
+          <li class="muted">まだありません。下に入れるか、候補から選んでください</li>
+        {/each}
+      </ul>
+      <div class="inline">
+        <input
+          type="text"
+          class="mono"
+          placeholder="gogs.example.com か github.com/組織の名前"
+          bind:value={newLocation}
+          onkeydown={(e) => e.key === "Enter" && addLocation(newLocation)}
+        />
+        <button onclick={() => addLocation(newLocation)} disabled={!newLocation.trim()}>追加</button>
+        <button class="primary" onclick={saveLocations} disabled={!locationsDirty || savingLocations}
+          >{savingLocations ? "保存しています…" : "保存"}</button
+        >
+      </div>
+      {#if candidates.length}
+        <div class="inline small">
+          <span class="muted">候補 (手元のリポジトリのリモートから):</span>
+          {#each candidates.slice(0, 12) as [loc, n] (loc)}
+            <button class="small" onclick={() => addLocation(loc)} title="載せる場所に足す">{loc} <span class="muted num">{n}</span></button>
+          {/each}
+        </div>
+      {/if}
+      {#if locationsDirty}
+        <p class="note">載せる場所を変えました。「保存」で反映します。</p>
+      {/if}
+      <div class="inline">
+        <button onclick={makeShare} disabled={sharing || locationsDirty || !savedLocations.length}
+          >{sharing ? "作っています…" : "社員向けの一覧を作って開く"}</button
+        >
+        <span class="muted small">載せる {shareCounts.shared} 件・廃止 {shareCounts.retired} 件 (保存済みの設定で)</span>
+      </div>
     </section>
   {/if}
 
@@ -595,6 +715,21 @@
     align-items: center;
     gap: 6px;
     margin-top: 4px;
+  }
+
+  .locs {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+  }
+
+  .locs li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .steps li {

@@ -267,6 +267,36 @@ pub struct Target {
     pub visibility: String,
     pub local_path: String,
     pub fetched_path: Option<String>,
+    /// 社員向けの一覧での見出し。載せないなら None
+    pub share: Option<String>,
+    /// 廃止 (照合しない)
+    pub retired: bool,
+}
+
+/// targets.json の決め方に使う設定
+#[derive(Debug, Default, Clone, Copy)]
+pub struct Rules<'a> {
+    /// 非表示にしたもの (入れない)
+    pub hidden: &'a [String],
+    /// 社員向けの一覧に載せる場所 (Config.share_locations)
+    pub share: &'a [String],
+    /// 廃止の印 (Config.retired)
+    pub retired: &'a [String],
+}
+
+/// key (<ホスト>/<owner>/<name>) が当てはまる「載せる場所」。区切りの途中では当てない (github.com/lancard は github.com/lancardcom に当てない)。
+/// いくつも当てはまれば長いもの
+fn share_of(key: &str, locations: &[String]) -> Option<String> {
+    locations
+        .iter()
+        .map(|l| l.trim().trim_end_matches('/'))
+        .filter(|l| !l.is_empty())
+        .filter(|l| {
+            let l = l.to_lowercase();
+            key == l || key.strip_prefix(&l).is_some_and(|rest| rest.starts_with('/'))
+        })
+        .max_by_key(|l| l.len())
+        .map(str::to_string)
 }
 
 /// インターネットに公開されうるのは github.com だけ。Gogs・Gitea・GitHub Enterprise などの自前のサーバーは、
@@ -279,11 +309,12 @@ fn on_public_host(key: &str) -> bool {
 
 /// 手元のリポジトリから targets.json の中身を作る。返すのは (LocalRepo.id, Target) の組 (パスの順)。
 /// 決め方は LockWatch の design.md §3.1 の「RepoTether 側の決め方」
-pub fn build_targets(repos: &[LocalRepo], remotes: &[RemoteRepo], hidden: &[String]) -> Vec<(String, Target)> {
+pub fn build_targets(repos: &[LocalRepo], remotes: &[RemoteRepo], rules: Rules) -> Vec<(String, Target)> {
     // 自前のサーバーのリポジトリは、一覧で公開でも private とみなす
     let private: HashMap<&str, bool> =
         remotes.iter().map(|r| (r.key.as_str(), r.private || !on_public_host(&r.key))).collect();
-    let hidden: HashSet<&str> = hidden.iter().map(String::as_str).collect();
+    let hidden: HashSet<&str> = rules.hidden.iter().map(String::as_str).collect();
+    let retired: HashSet<&str> = rules.retired.iter().map(String::as_str).collect();
     let mut sorted: Vec<&LocalRepo> = repos.iter().filter(|r| !hidden.contains(r.id.as_str())).collect();
     sorted.sort_by(|a, b| a.id.cmp(&b.id));
 
@@ -305,13 +336,24 @@ pub fn build_targets(repos: &[LocalRepo], remotes: &[RemoteRepo], hidden: &[Stri
         } else {
             "unknown"
         };
+        let share = primary.as_deref().and_then(|k| share_of(k, rules.share));
         // 同じリモートのクローンが 2 つ以上あれば、2 つ目からはパスで区別する (id の重複は LockWatch で誤りになる)
         let id = match primary {
             Some(k) if !used.contains(&k) => k,
             _ => format!("local:{path}"),
         };
         used.insert(id.clone());
-        out.push((r.id.clone(), Target { id, visibility: visibility.into(), local_path: path, fetched_path: None }));
+        out.push((
+            r.id.clone(),
+            Target {
+                id,
+                visibility: visibility.into(),
+                local_path: path,
+                fetched_path: None,
+                share,
+                retired: retired.contains(r.id.as_str()),
+            },
+        ));
     }
     out
 }
@@ -363,6 +405,8 @@ pub struct Finding {
     /// 悪意あるコードの記録 (OSV の MAL-) か。LockWatch 0.2.0 までの結果には無い (false)
     pub malicious: bool,
     pub summary: String,
+    /// 脆弱性の発行日 (OSV の published)。古い LockWatch の結果には無い
+    pub published: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -449,6 +493,10 @@ pub struct RepoVulns {
     pub result: Option<RepoResult>,
     /// 前回から新しく出たもの (package, id)
     pub new: Vec<(String, String)>,
+    /// 社員向けの一覧での見出し。載せないなら None
+    pub share: Option<String>,
+    /// 廃止 (照合しない)
+    pub retired: bool,
 }
 
 /// 画面に渡す全体
@@ -484,7 +532,15 @@ pub fn report(targets: &[(String, Target)], latest: Option<&Latest>) -> VulnRepo
             .unwrap_or_default();
         by_repo.insert(
             local_id.clone(),
-            RepoVulns { target_id: t.id.clone(), visibility: t.visibility.clone(), result, new },
+            RepoVulns {
+                target_id: t.id.clone(),
+                visibility: t.visibility.clone(),
+                // 廃止にする前の結果が残っていても見せない (照合していないので古いまま)
+                result: if t.retired { None } else { result },
+                new: if t.retired { vec![] } else { new },
+                share: t.share.clone(),
+                retired: t.retired,
+            },
         );
     }
     VulnReport {
@@ -540,6 +596,15 @@ pub fn scan_one(r: &Runner, target_id: &str, fresh: bool) -> Result<(), String> 
     }
 }
 
+/// `lockwatch report --share`。社員向けの一覧を `<data>/share` に書き、その index.html の場所を返す。照合はしない
+pub fn share_report(r: &Runner, loc: &Locations) -> Result<PathBuf, String> {
+    let o = run(r, &["report", "--share"], CONFIG_TIMEOUT)?;
+    if o.code != Some(0) {
+        return Err(error_line(&o, "LockWatch が社員向けの一覧を書けませんでした (LockWatch を新しくしてください)"));
+    }
+    Ok(loc.data_dir.join("share").join("index.html"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,7 +652,7 @@ mod tests {
             remote("github.com/me/pub2", false),
             remote("git.example.com/me/pub2", true),
         ];
-        let t: HashMap<String, Target> = build_targets(&repos, &remotes, &[]).into_iter().collect();
+        let t: HashMap<String, Target> = build_targets(&repos, &remotes, Rules::default()).into_iter().collect();
         let get = |p: &str| &t[&util::path_key(p)];
         assert_eq!((get(r"C:\Repos\pub").id.as_str(), get(r"C:\Repos\pub").visibility.as_str()), ("github.com/me/pub", "public"));
         assert_eq!(get(r"C:\Repos\priv").visibility, "private");
@@ -617,7 +682,7 @@ mod tests {
             remote("github.example.co.jp/me/app", false),
             remote("github.com/me/app", false),
         ];
-        let t: HashMap<String, Target> = build_targets(&repos, &remotes, &[]).into_iter().collect();
+        let t: HashMap<String, Target> = build_targets(&repos, &remotes, Rules::default()).into_iter().collect();
         assert_eq!(t[&util::path_key(r"C:\Repos\gogs")].visibility, "private");
         assert_eq!(t[&util::path_key(r"C:\Repos\ghe")].visibility, "private");
         assert_eq!(t[&util::path_key(r"C:\Repos\gh")].visibility, "public");
@@ -626,16 +691,45 @@ mod tests {
     #[test]
     fn hidden_repos_are_left_out() {
         let repos = vec![local(r"C:\Repos\a", &[]), local(r"C:\Repos\b", &[])];
-        let t = build_targets(&repos, &[], &[util::path_key(r"C:\Repos\a")]);
+        let hidden = [util::path_key(r"C:\Repos\a")];
+        let t = build_targets(&repos, &[], Rules { hidden: &hidden, ..Default::default() });
         assert_eq!(t.len(), 1);
         assert_eq!(t[0].0, util::path_key(r"C:\Repos\b"));
+    }
+
+    #[test]
+    fn share_and_retired() {
+        let repos = vec![
+            local(r"C:\Repos\gogs", &[("origin", Some("gogs.example.com/someone/app"))]),
+            local(r"C:\Repos\org", &[("origin", Some("github.com/acme/api"))]),
+            local(r"C:\Repos\orgdev", &[("origin", Some("github.com/acmedev/web"))]),
+            local(r"C:\Repos\mine", &[("origin", Some("github.com/me/tool"))]),
+            local(r"C:\Repos\sample", &[("origin", Some("github.com/flutter/codelabs"))]),
+            local(r"C:\Repos\nolink", &[]),
+        ];
+        let share = ["gogs.example.com".to_string(), " github.com/Acme/ ".to_string(), "github.com/acmedev".to_string()];
+        let retired = [util::path_key(r"C:\Repos\orgdev")];
+        let t: HashMap<String, Target> =
+            build_targets(&repos, &[], Rules { share: &share, retired: &retired, ..Default::default() }).into_iter().collect();
+        let get = |p: &str| &t[&util::path_key(p)];
+        assert_eq!(get(r"C:\Repos\gogs").share.as_deref(), Some("gogs.example.com"));
+        // 書いた文字のまま見出しにする (前後の空白と末尾の / は落とす)。github.com/acme は github.com/acmedev に当てない
+        assert_eq!(get(r"C:\Repos\org").share.as_deref(), Some("github.com/Acme"));
+        assert_eq!(get(r"C:\Repos\orgdev").share.as_deref(), Some("github.com/acmedev"));
+        for p in [r"C:\Repos\mine", r"C:\Repos\sample", r"C:\Repos\nolink"] {
+            assert_eq!(get(p).share, None, "{p}");
+        }
+        assert!(get(r"C:\Repos\orgdev").retired);
+        assert!(!get(r"C:\Repos\org").retired);
+        let v = serde_json::to_value(get(r"C:\Repos\orgdev")).unwrap();
+        assert_eq!((v["share"].as_str(), v["retired"].as_bool()), (Some("github.com/acmedev"), Some(true)));
     }
 
     #[test]
     fn targets_are_written_only_when_changed() {
         let d = tmp("targets");
         let path = d.join("data").join("targets.json");
-        let t = build_targets(&[local(r"C:\Repos\a", &[])], &[], &[]);
+        let t = build_targets(&[local(r"C:\Repos\a", &[])], &[], Rules::default());
         let ts: Vec<Target> = t.into_iter().map(|(_, t)| t).collect();
         assert!(write_targets(&path, &ts).unwrap());
         assert!(!write_targets(&path, &ts).unwrap());
@@ -670,7 +764,7 @@ mod tests {
         let targets = build_targets(
             &[local(r"C:\Repos\pub", &[("origin", Some("github.com/me/pub"))]), local(r"C:\Repos\x", &[])],
             &[remote("github.com/me/pub", false)],
-            &[],
+            Rules::default(),
         );
         let rep = report(&targets, Some(&latest));
         let pubr = &rep.by_repo[&util::path_key(r"C:\Repos\pub")];
