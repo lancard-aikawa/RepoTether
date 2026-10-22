@@ -69,6 +69,7 @@ const mockConfig: Config = {
   links: {},
   shareLocations: [],
   retired: [],
+  runtimes: {},
 };
 
 /** ブラウザ表示の確認用に、外から差し込める値 (tools/manual-shots.mjs がマニュアルの画面を撮るときに使う) */

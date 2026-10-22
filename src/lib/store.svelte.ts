@@ -404,6 +404,20 @@ export async function setRetired(key: string, on: boolean) {
   await loadVulns();
 }
 
+/** 言語の版を確定する / 確定を外す (version が空)。key は LocalRepo.id、lang は php / node。
+ *  そのリポジトリを LockWatch で照合し直して、結果に反映する (lock ファイルが同じならすぐ終わる) */
+export async function setRuntime(key: string, lang: string, version: string) {
+  if (!app.config) return;
+  const all = structuredClone($state.snapshot(app.config.runtimes ?? {}));
+  const mine = { ...(all[key] ?? {}) };
+  if (version.trim()) mine[lang] = version.trim();
+  else delete mine[lang];
+  if (Object.keys(mine).length) all[key] = mine;
+  else delete all[key];
+  await updateConfig({ ...app.config, runtimes: all });
+  await scanVulns(key);
+}
+
 /** プロジェクトを一覧から外す / 戻す */
 export async function setHidden(key: string, hidden: boolean) {
   if (!app.config) return;

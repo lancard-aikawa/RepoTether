@@ -2,7 +2,7 @@
 //
 // 「隠す」は、深刻度 (low など) か知らせの種類 (unmaintained など) を選ぶ。LockWatch の report --hide と同じ考え方
 
-import type { VulnFinding, VulnNotice, VulnReport, VulnSeverity } from "./types";
+import type { VulnRuntime, VulnFinding, VulnNotice, VulnReport, VulnSeverity } from "./types";
 
 export const SEVERITIES: VulnSeverity[] = ["critical", "high", "medium", "low", "unknown"];
 /** RustSec の知らせの種類 (脆弱性ではないもの) */
@@ -117,4 +117,27 @@ export function noticeText(n: Pick<VulnNotice, "kind" | "detail">): string {
     default:
       return d;
   }
+}
+
+// ---- 言語そのものの版 (LockWatch の design.md §3.6) ----
+
+export const RUNTIME_LABEL: Record<string, string> = { php: "PHP", node: "Node.js" };
+
+/** 一覧で印を付けるもの: サポート終了・終了が近い・修正版がある */
+export function runtimeAttention(r: VulnRuntime): boolean {
+  return r.status === "ended" || r.status === "soon" || r.security.length > 0;
+}
+
+/** 印の文字 (例: "PHP 8.1 終了") */
+export function runtimeBrief(r: VulnRuntime): string {
+  const what = r.status === "ended" ? "終了" : r.status === "soon" ? "終了間近" : "修正版あり";
+  return `${RUNTIME_LABEL[r.name] ?? r.name} ${r.cycle ?? r.version} ${what}`;
+}
+
+/** そのプロジェクトで版を聞く言語。RepoTether が判定した言語から (PHP → php、JavaScript・TypeScript → node) */
+export function expectedRuntimes(languages: readonly string[]): string[] {
+  const out: string[] = [];
+  if (languages.includes("PHP")) out.push("php");
+  if (languages.some((l) => l === "JavaScript" || l === "TypeScript")) out.push("node");
+  return out;
 }

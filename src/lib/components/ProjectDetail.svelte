@@ -14,6 +14,7 @@
     savePrefs,
     setHidden,
     setRetired,
+    setRuntime,
     setLinks,
     setTags,
     toast,
@@ -297,6 +298,41 @@
   }
 
   /** 前回の結果を使わずに照合し直す */
+  // ---- 言語の版 (LockWatch の design.md §3.6) ----
+  const RUNTIME_ORDER = ["php", "node"];
+  /** 出す言語: LockWatch の結果にあるもの、確定した版のあるもの、RepoTether の判定から版を聞くもの */
+  const runtimeRows = $derived.by(() => {
+    const id = project.local?.id;
+    if (!id || !vulns || vulns.retired) return [];
+    const found = vulns.result?.runtimes ?? [];
+    const confirmed = app.config?.runtimes?.[id] ?? {};
+    const langs = new Set([...found.map((r) => r.name), ...Object.keys(confirmed), ...vulnsLib.expectedRuntimes(project.languages)]);
+    return RUNTIME_ORDER.filter((l) => langs.has(l)).map((lang) => ({
+      lang,
+      result: found.find((r) => r.name === lang) ?? null,
+      confirmed: confirmed[lang] ?? "",
+    }));
+  });
+  let runtimeDraft = $state<Record<string, string>>({});
+  let runtimeSaving = $state("");
+
+  /** 版の項目を更新する (空なら確定を外す)。そのリポジトリを照合し直して結果に反映する */
+  async function saveRuntime(lang: string, version: string) {
+    if (!project.local) return;
+    const key = project.key;
+    const label = vulnsLib.RUNTIME_LABEL[lang] ?? lang;
+    runtimeSaving = lang;
+    try {
+      await setRuntime(project.local.id, lang, version);
+      if (project.key === key) runtimeDraft = { ...runtimeDraft, [lang]: "" };
+      toast(version.trim() ? `${label} の版を ${version.trim()} にしました` : `${label} の確定を外しました`);
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      runtimeSaving = "";
+    }
+  }
+
   async function rescan() {
     if (!project.local) return;
     const key = project.key;
@@ -922,6 +958,66 @@
             <button class="small-btn" onclick={openLockwatchSettings}>上の「脆弱性」タブを開く</button>
           {/if}
           {#if scanError}<p class="err small">{scanError}</p>{/if}
+          {#if runtimeRows.length}
+            <div class="runtimes small">
+              <p>
+                <strong>言語</strong>
+                <span class="muted">言語そのもの (PHP・Node.js) のサポート終了と修正版。版を上げたら、ここの版を更新してください</span>
+              </p>
+              {#each runtimeRows as row (row.lang)}
+                {@const r = row.result}
+                <div class="rt">
+                  <span class="rt-name">{vulnsLib.RUNTIME_LABEL[row.lang]}</span>
+                  {#if r}
+                    <span class="mono">{r.version}</span>
+                    <span class="host">{r.confirmed ? "確定" : r.lowerBound ? "推定 (下限)" : "推定"}</span>
+                    {#if r.status === "ended"}
+                      <span class="badge high">サポート終了 ({r.eol})</span>
+                    {:else if r.status === "soon"}
+                      <span class="badge mid">終了が近い ({r.eol} まで)</span>
+                    {/if}
+                    {#if r.security.length}
+                      <span class="badge high">修正版あり</span>
+                      <span><span class="mono">{r.upgradeTo}</span> に上げる (この版より後のセキュリティリリース {r.security.length} 件。最新 {r.security[r.security.length - 1].date ?? "-"})</span>
+                    {:else if r.exact && r.status === "ended" && !r.upgradeTo}
+                      <span class="muted">この系列の最後の版です (これ以上の修正は出ません)</span>
+                    {:else if r.exact && r.status !== "unknown" && !r.upgradeTo}
+                      <span class="badge good">最新</span>
+                    {:else if r.exact && r.upgradeTo}
+                      <span class="muted"><span class="mono">{r.upgradeTo}</span> が出ています (セキュリティリリースではない)</span>
+                    {:else if !r.exact && r.latest}
+                      <span class="muted">系列の最新は <span class="mono">{r.latest}</span>。動かしている版を入れると、修正版の有無が分かります</span>
+                    {/if}
+                    <div class="muted">{r.source}</div>
+                  {:else if row.confirmed}
+                    <span class="mono">{row.confirmed}</span> <span class="host">確定</span>
+                    <span class="muted">結果は次の照合で出ます</span>
+                  {:else}
+                    <span class="muted">版が分かりません。動かしている版を入れてください</span>
+                  {/if}
+                  <div class="rt-edit">
+                    <input
+                      type="text"
+                      class="mono"
+                      placeholder={row.lang === "php" ? "例: 8.2.20" : "例: 22.23.1"}
+                      aria-label="{vulnsLib.RUNTIME_LABEL[row.lang]} の版"
+                      bind:value={runtimeDraft[row.lang]}
+                      onkeydown={(e) => e.key === "Enter" && (runtimeDraft[row.lang] ?? "").trim() && saveRuntime(row.lang, runtimeDraft[row.lang])}
+                    />
+                    <button
+                      class="small-btn"
+                      onclick={() => saveRuntime(row.lang, runtimeDraft[row.lang] ?? "")}
+                      disabled={!!runtimeSaving || !(runtimeDraft[row.lang] ?? "").trim()}
+                      >{runtimeSaving === row.lang ? "反映しています…" : "版を更新"}</button
+                    >
+                    {#if row.confirmed}
+                      <button class="small-btn" onclick={() => saveRuntime(row.lang, "")} disabled={!!runtimeSaving}>確定を外す</button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
           {@const res = vulns.result}
           {#if !res}
             <p class="small">まだ照合していません。「今すぐ調べる」か、LockWatch の定期実行を待ってください。</p>
@@ -1207,6 +1303,38 @@
     display: inline-flex;
     gap: 4px;
     flex: none;
+  }
+
+  .runtimes {
+    margin: 6px 0;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+
+  .runtimes p {
+    margin: 0 0 2px;
+  }
+
+  .rt {
+    padding: 5px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .rt-name {
+    font-weight: 600;
+    margin-right: 4px;
+  }
+
+  .rt-edit {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-top: 3px;
+  }
+
+  .rt-edit input {
+    width: 9em;
   }
 
   .small-btn {

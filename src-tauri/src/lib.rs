@@ -58,11 +58,11 @@ fn write_lockwatch_targets(
     snap: &Snapshot,
 ) -> Result<Option<(core::lockwatch::Runner, core::lockwatch::Locations, Vec<(String, core::lockwatch::Target)>)>, String> {
     let Some((runner, loc)) = state.lockwatch()? else { return Ok(None) };
-    let (hidden, share, retired) = {
+    let (hidden, share, retired, runtimes) = {
         let c = state.config.lock().unwrap();
-        (c.hidden.clone(), c.share_locations.clone(), c.retired.clone())
+        (c.hidden.clone(), c.share_locations.clone(), c.retired.clone(), c.runtimes.clone())
     };
-    let rules = core::lockwatch::Rules { hidden: &hidden, share: &share, retired: &retired };
+    let rules = core::lockwatch::Rules { hidden: &hidden, share: &share, retired: &retired, runtimes: Some(&runtimes) };
     let targets = core::lockwatch::build_targets(&snap.repos, &snap.remote_repos, rules);
     let list: Vec<core::lockwatch::Target> = targets.iter().map(|(_, t)| t.clone()).collect();
     core::lockwatch::write_targets(&loc.targets, &list)?;

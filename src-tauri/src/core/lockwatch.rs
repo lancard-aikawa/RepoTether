@@ -271,6 +271,9 @@ pub struct Target {
     pub share: Option<String>,
     /// 廃止 (照合しない)
     pub retired: bool,
+    /// 確定した言語の版 ({"php": "8.2.20"})。無ければ書かない (LockWatch が見当で決める)
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub runtimes: BTreeMap<String, String>,
 }
 
 /// targets.json の決め方に使う設定
@@ -282,6 +285,8 @@ pub struct Rules<'a> {
     pub share: &'a [String],
     /// 廃止の印 (Config.retired)
     pub retired: &'a [String],
+    /// 確定した言語の版 (Config.runtimes)
+    pub runtimes: Option<&'a BTreeMap<String, BTreeMap<String, String>>>,
 }
 
 /// key (<ホスト>/<owner>/<name>) が当てはまる「載せる場所」。区切りの途中では当てない (github.com/lancard は github.com/lancardcom に当てない)。
@@ -352,6 +357,11 @@ pub fn build_targets(repos: &[LocalRepo], remotes: &[RemoteRepo], rules: Rules) 
                 fetched_path: None,
                 share,
                 retired: retired.contains(r.id.as_str()),
+                runtimes: rules
+                    .runtimes
+                    .and_then(|m| m.get(&r.id))
+                    .map(|m| m.iter().filter(|(_, v)| !v.trim().is_empty()).map(|(k, v)| (k.clone(), v.trim().to_string())).collect())
+                    .unwrap_or_default(),
             },
         ));
     }
@@ -421,7 +431,39 @@ pub struct RepoResult {
     pub findings: Vec<Finding>,
     /// lock ファイルの健全性の注意。古い LockWatch の結果には無い (空)
     pub notices: Vec<Notice>,
+    /// 言語そのもの (PHP・Node.js) の版 (LockWatch の design.md §3.6)。古い LockWatch の結果には無い (空)
+    pub runtimes: Vec<Runtime>,
     pub error: Option<String>,
+}
+
+/// 言語そのものの版の結果 (LockWatch の design.md §3.6)
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct Runtime {
+    /// php / node
+    pub name: String,
+    pub version: String,
+    /// どこから (ファイルの名前か「RepoTether で確定」)
+    pub source: String,
+    pub confirmed: bool,
+    /// composer の require.php などの下限から推したもの (系列だけを見る)
+    pub lower_bound: bool,
+    pub cycle: Option<String>,
+    pub eol: Option<String>,
+    /// ok / soon / ended / unknown
+    pub status: String,
+    pub latest: Option<String>,
+    pub exact: bool,
+    /// 同じ系列で、この版より新しいセキュリティリリース
+    pub security: Vec<RuntimeRelease>,
+    pub upgrade_to: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RuntimeRelease {
+    pub version: String,
+    pub date: Option<String>,
 }
 
 /// lock ファイルそのものを読んで分かったこと (LockWatch の design.md §3.5)。脆弱性とは別
@@ -723,6 +765,29 @@ mod tests {
         assert!(!get(r"C:\Repos\org").retired);
         let v = serde_json::to_value(get(r"C:\Repos\orgdev")).unwrap();
         assert_eq!((v["share"].as_str(), v["retired"].as_bool()), (Some("github.com/acmedev"), Some(true)));
+        assert!(v.get("runtimes").is_none(), "確定した版が無ければ書かない");
+    }
+
+    #[test]
+    fn confirmed_runtimes_are_passed_on() {
+        let repos = vec![local(r"C:\Repos\web", &[]), local(r"C:\Repos\other", &[])];
+        let mut runtimes = BTreeMap::new();
+        runtimes.insert(
+            util::path_key(r"C:\Repos\web"),
+            BTreeMap::from([("php".to_string(), " 8.2.20 ".to_string()), ("node".to_string(), "".to_string())]),
+        );
+        let t: HashMap<String, Target> =
+            build_targets(&repos, &[], Rules { runtimes: Some(&runtimes), ..Default::default() }).into_iter().collect();
+        let web = serde_json::to_value(&t[&util::path_key(r"C:\Repos\web")]).unwrap();
+        assert_eq!(web["runtimes"], serde_json::json!({"php": "8.2.20"}), "空の版は書かない");
+        assert!(t[&util::path_key(r"C:\Repos\other")].runtimes.is_empty());
+        let r: Runtime = serde_json::from_str(
+            r#"{"name": "php", "version": "8.2.20", "status": "soon", "exact": true, "security": [{"version": "8.2.35", "date": "2026-10-21"}],
+                "upgrade_to": "8.2.35", "future": 1}"#,
+        )
+        .unwrap();
+        assert_eq!((r.security[0].version.as_str(), r.upgrade_to.as_deref()), ("8.2.35", Some("8.2.35")));
+        assert_eq!(serde_json::to_value(&r).unwrap()["upgradeTo"], "8.2.35");
     }
 
     #[test]

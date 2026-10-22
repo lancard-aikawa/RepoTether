@@ -45,6 +45,8 @@ pub struct Config {
     pub share_locations: Vec<String>,
     /// 廃止の印を付けたプロジェクト (LocalRepo.id)。更新しないと決めたもの。LockWatch で照合しない
     pub retired: Vec<String>,
+    /// 確定した言語の版。LocalRepo.id → 言語 (php / node) → 版 ("8.2.20")。LockWatch の targets.json の runtimes
+    pub runtimes: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -136,6 +138,7 @@ impl Default for Config {
             links: BTreeMap::new(),
             share_locations: vec![],
             retired: vec![],
+            runtimes: BTreeMap::new(),
         }
     }
 }

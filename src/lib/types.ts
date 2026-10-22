@@ -156,6 +156,8 @@ export interface Config {
   shareLocations: string[];
   /** 廃止の印を付けたプロジェクト (LocalRepo.id)。LockWatch で照合しない */
   retired: string[];
+  /** 確定した言語の版。LocalRepo.id -> 言語 (php / node) -> 版 */
+  runtimes: Record<string, Record<string, string>>;
 }
 
 export interface Link {
@@ -206,7 +208,29 @@ export interface VulnRepoResult {
   findings: VulnFinding[];
   /** lock ファイルの健全性の注意 (脆弱性とは別)。古い LockWatch の結果では空 */
   notices: VulnNotice[];
+  /** 言語そのもの (PHP・Node.js) の版。古い LockWatch の結果では空 */
+  runtimes: VulnRuntime[];
   error: string | null;
+}
+
+/** 言語そのものの版の結果 (LockWatch の design.md §3.6) */
+export interface VulnRuntime {
+  /** php / node */
+  name: string;
+  version: string;
+  /** どこから (ファイルの名前か「RepoTether で確定」) */
+  source: string;
+  confirmed: boolean;
+  /** composer の require.php などの下限から推したもの */
+  lowerBound: boolean;
+  cycle: string | null;
+  eol: string | null;
+  status: "ok" | "soon" | "ended" | "unknown";
+  latest: string | null;
+  exact: boolean;
+  /** 同じ系列で、この版より新しいセキュリティリリース */
+  security: { version: string; date: string | null }[];
+  upgradeTo: string | null;
 }
 
 /** LockWatch が lock ファイルそのものを読んで分かったこと */

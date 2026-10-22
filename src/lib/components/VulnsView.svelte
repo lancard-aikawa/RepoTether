@@ -3,7 +3,7 @@
   // 1 件ずつの中身は、行を押して開く詳細パネルの「脆弱性」タブで見る。
   import { untrack } from "svelte";
   import type { Project } from "$lib/derive";
-  import type { LockwatchStatus, VulnFinding } from "$lib/types";
+  import type { LockwatchStatus, VulnFinding, VulnRuntime } from "$lib/types";
   import * as api from "$lib/api";
   import { relative, toMs } from "$lib/format";
   import { app, errorText, loadVulns, openProject, prefs, savePrefs, toast, updateConfig } from "$lib/store.svelte";
@@ -22,6 +22,8 @@
     /** 前回から新しく出た数 */
     fresh: number;
     notices: number;
+    /** 注意の要る言語 (サポート終了・終了が近い・修正版あり) */
+    runtimes: VulnRuntime[];
     scannedAt: number | null;
     error: string | null;
   };
@@ -41,6 +43,7 @@
         heavy: vulnsLib.heavyCount(findings, []),
         fresh: findings.filter((f) => v.new.some(([pkg, id]) => pkg === f.package && id === f.id)).length,
         notices: res?.notices.length ?? 0,
+        runtimes: (res?.runtimes ?? []).filter(vulnsLib.runtimeAttention),
         scannedAt: toMs(res?.scannedAt),
         error: res?.status === "error" ? (res.error ?? "照合できませんでした") : null,
       });
@@ -49,6 +52,7 @@
       (a, b) =>
         b.heavy - a.heavy ||
         b.findings.length - a.findings.length ||
+        b.runtimes.length - a.runtimes.length ||
         Number(!!b.error) - Number(!!a.error) ||
         b.notices - a.notices ||
         a.project.name.localeCompare(b.project.name, "ja"),
@@ -56,7 +60,7 @@
   });
 
   /** 見るべきもの: 脆弱性・注意があるか、照合できなかったもの */
-  const flagged = $derived(rows.filter((r) => r.findings.length || r.notices || r.error));
+  const flagged = $derived(rows.filter((r) => r.findings.length || r.notices || r.error || r.runtimes.length));
   let showAll = $state(false);
   const shown = $derived(showAll ? rows : flagged);
 
@@ -322,6 +326,11 @@
                       {:else}
                         <span class="muted">なし</span>
                       {/if}
+                    {/each}
+                    {#each r.runtimes as rt (rt.name)}
+                      <span class="badge {rt.status === 'ended' || rt.security.length ? 'high' : 'mid'}" title="言語そのもの。詳細パネルの「脆弱性」タブで版を更新できます"
+                        >{vulnsLib.runtimeBrief(rt)}</span
+                      >
                     {/each}
                   </td>
                   <td class="c-notice">{#if r.notices}<span class="badge mid">注意 {r.notices}</span>{/if}</td>
