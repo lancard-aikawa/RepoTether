@@ -1,13 +1,14 @@
 <script lang="ts">
   // 脆弱性タブ。上に LockWatch の結果をプロジェクトごとに並べ、下に LockWatch の場所と状態を出す。
-  // 1 件ずつの中身は、行を押して開く詳細パネルの「脆弱性」タブで見る。
+  // 行を押すと、その下に 1 件ずつの中身を広げる。「詳細を開く」で状態タブの詳細パネルの「脆弱性」タブへ移る。
   import { untrack } from "svelte";
   import type { Project } from "$lib/derive";
-  import type { LockwatchStatus, VulnFinding, VulnRuntime } from "$lib/types";
+  import type { LockwatchStatus, RepoVulns, VulnFinding, VulnRuntime } from "$lib/types";
   import * as api from "$lib/api";
   import { relative, toMs } from "$lib/format";
   import { app, errorText, loadVulns, openProject, prefs, savePrefs, toast, updateConfig } from "$lib/store.svelte";
   import * as vulnsLib from "$lib/vulns";
+  import AssessBlock from "./AssessBlock.svelte";
   import RepoIcon from "./RepoIcon.svelte";
 
   let { projects, now }: { projects: Project[]; now: number } = $props();
@@ -21,6 +22,9 @@
     heavy: number;
     /** 前回から新しく出た数 */
     fresh: number;
+    /** 前回から新しく出たもの [package, id] */
+    newPairs: [string, string][];
+    visibility: RepoVulns["visibility"];
     notices: number;
     /** 注意の要る言語 (サポート終了・終了が近い・修正版あり) */
     runtimes: VulnRuntime[];
@@ -42,6 +46,8 @@
         findings,
         heavy: vulnsLib.heavyCount(findings, []),
         fresh: findings.filter((f) => v.new.some(([pkg, id]) => pkg === f.package && id === f.id)).length,
+        newPairs: v.new,
+        visibility: v.visibility,
         notices: res?.notices.length ?? 0,
         runtimes: (res?.runtimes ?? []).filter(vulnsLib.runtimeAttention),
         scannedAt: toMs(res?.scannedAt),
@@ -81,7 +87,18 @@
     reloading = false;
   }
 
+  /** 中身を広げている行 (プロジェクトの key)。いくつでも広げられる */
+  let expanded = $state<string[]>([]);
+  function toggle(key: string) {
+    expanded = expanded.includes(key) ? expanded.filter((k) => k !== key) : [...expanded, key];
+  }
+
+  /** 広げた中身に最初に出す数。数百件あるものもあるので、残りは押して出す */
+  const FIRST_FINDINGS = 20;
+  let allFindings = $state<string[]>([]);
+
   function rowKey(e: KeyboardEvent, run: () => void) {
+    if (e.target !== e.currentTarget) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       run();
@@ -151,11 +168,7 @@
   let guiOpened = $state(false);
 
   /** LockWatch の画面 (lockwatch gui) は 0.2.0 から。古い LockWatch では押せないようにする */
-  const LOCKWATCH_GUI_SINCE = [0, 2];
-  const hasGui = (version: string) => {
-    const [major, minor] = version.split(".").map((x) => Number.parseInt(x, 10) || 0);
-    return major > LOCKWATCH_GUI_SINCE[0] || (major === LOCKWATCH_GUI_SINCE[0] && minor >= LOCKWATCH_GUI_SINCE[1]);
-  };
+  const hasGui = (version: string) => vulnsLib.lockwatchAtLeast(version, 0, 2);
 
   /** 入力中の場所が、確かめて使えると分かった場所のままか (確かめたあとに書き換えたら、もう一度確かめるまで開かせない) */
   const checkedPath = $derived(lw.state === "ok" && lw.path === path.trim() ? lw.path : null);
@@ -304,9 +317,18 @@
             </thead>
             <tbody>
               {#each shown as r (r.project.key)}
-                {@const open = () => openProject(r.project.key, "vulns")}
-                <tr tabindex="0" onclick={open} onkeydown={(e) => rowKey(e, open)}>
+                {@const isOpen = expanded.includes(r.project.key)}
+                {@const flip = () => toggle(r.project.key)}
+                <tr
+                  class:open={isOpen}
+                  tabindex="0"
+                  aria-expanded={isOpen}
+                  title={isOpen ? "押すと畳む" : "押すと、この下に中身を広げる"}
+                  onclick={flip}
+                  onkeydown={(e) => rowKey(e, flip)}
+                >
                   <td class="c-name">
+                    <span class="caret" aria-hidden="true">{isOpen ? "▾" : "▸"}</span>
                     <RepoIcon name={r.project.name} path={r.project.path} />
                     <span class="name">{r.project.name}</span>
                     {#if r.fresh}<span class="host new">新しく出た {r.fresh}</span>{/if}
@@ -337,9 +359,74 @@
                   <td class="c-when muted" title={r.scannedAt ? new Date(r.scannedAt).toLocaleString() : ""}>
                     {relative(r.scannedAt, now)}
                   </td>
-                  <!-- 行のどこを押しても開くが、押せると分かるようにボタンも置く -->
-                  <td class="c-act"><button tabindex="-1">詳細を開く</button></td>
+                  <td class="c-act">
+                    <button
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        openProject(r.project.key, "vulns");
+                      }}
+                      title="状態タブで、このプロジェクトの詳細パネルの「脆弱性」タブを開く">詳細を開く</button
+                    >
+                  </td>
                 </tr>
+                {#if isOpen}
+                  <tr class="more">
+                    <td colspan="5">
+                      {#if r.error}
+                        <pre class="small">{r.error}</pre>
+                      {/if}
+                      {#if r.project.local && r.visibility && (r.findings.some((f) => !f.informational) || r.runtimes.length)}
+                        <AssessBlock repoId={r.project.local.id} visibility={r.visibility} {now} />
+                      {/if}
+                      {#if r.runtimes.length}
+                        <ul class="items">
+                          {#each r.runtimes as rt (rt.name)}
+                            <li>
+                              <span class="badge {rt.status === 'ended' || rt.security.length ? 'high' : 'mid'}">{vulnsLib.runtimeBrief(rt)}</span>
+                              <span class="muted small">{rt.source}</span>
+                            </li>
+                          {/each}
+                        </ul>
+                      {/if}
+                      {#if r.findings.length}
+                        <ul class="items">
+                          {#each allFindings.includes(r.project.key) ? r.findings : r.findings.slice(0, FIRST_FINDINGS) as f (f.lockfile + f.package + f.version + f.id)}
+                            <li>
+                              <span class="badge {vulnsLib.SEVERITY_BADGE[f.severity]}">{vulnsLib.SEVERITY_LABEL[f.severity]}</span>
+                              <span class="mono">{f.package} {f.version}</span>
+                              {#if f.malicious}<span class="badge high">{vulnsLib.MALICIOUS_LABEL}</span>{/if}
+                              {#if f.informational}<span class="host">{vulnsLib.choiceLabel(f.informational)}</span>{/if}
+                              {#if r.newPairs.some(([p, i]) => p === f.package && i === f.id)}<span class="host new">新しく出た</span>{/if}
+                              <button class="link mono small" onclick={() => api.openUrl(`https://osv.dev/vulnerability/${encodeURIComponent(f.id)}`)} title="osv.dev で詳しく見る"
+                                >{f.id}</button
+                              >
+                              <span class="small">
+                                {#if f.fixed.length}<span class="muted">直る版</span> <span class="mono">{f.fixed.join(", ")}</span>{:else}<span class="muted">直る版なし</span>{/if}
+                              </span>
+                              {#if f.summary}<div class="small">{f.summary}</div>{/if}
+                              <div class="muted small mono">{f.lockfile}</div>
+                            </li>
+                          {/each}
+                        </ul>
+                        {#if r.findings.length > FIRST_FINDINGS && !allFindings.includes(r.project.key)}
+                          <p class="small">
+                            <span class="muted">ほか {r.findings.length - FIRST_FINDINGS} 件</span>
+                            <button class="small" onclick={() => (allFindings = [...allFindings, r.project.key])}>残りも出す</button>
+                          </p>
+                        {/if}
+                      {/if}
+                      {#if r.notices}
+                        <p class="small">
+                          <span class="badge mid">注意 {r.notices}</span>
+                          <span class="muted">中身は「詳細を開く」の先で見る</span>
+                        </p>
+                      {/if}
+                      {#if !r.error && !r.runtimes.length && !r.findings.length && !r.notices}
+                        <p class="muted small">見せるものはありません。</p>
+                      {/if}
+                    </td>
+                  </tr>
+                {/if}
               {/each}
             </tbody>
           </table>
@@ -590,7 +677,7 @@
     flex: 1;
   }
 
-  /* プロジェクトごとの結果。行を押すと状態タブの詳細パネルを開く */
+  /* プロジェクトごとの結果。行を押すとその下に中身を広げる */
   .results {
     width: 100%;
     border-collapse: collapse;
@@ -616,8 +703,51 @@
     cursor: pointer;
   }
 
-  .results tbody tr:hover {
+  .results tbody tr:hover,
+  .results tbody tr.open {
     background: var(--hover);
+  }
+
+  .caret {
+    display: inline-block;
+    width: 1em;
+    color: var(--ink-2);
+  }
+
+  /* 広げた中身。行ではないので押せる見た目にしない */
+  .results tbody tr.more {
+    cursor: auto;
+    background: var(--surface-2);
+  }
+
+  .results tr.more td {
+    padding: 6px 8px 10px 28px;
+  }
+
+  .items {
+    list-style: none;
+    margin: 0 0 6px;
+    padding: 0;
+  }
+
+  .items li {
+    padding: 4px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .items li:last-child {
+    border-bottom: none;
+  }
+
+  .items .badge,
+  .items .link {
+    margin-right: 6px;
+  }
+
+  pre.small {
+    font-size: 12px;
+    margin: 0 0 6px;
+    white-space: pre-wrap;
   }
 
   .results tbody tr:focus-visible {

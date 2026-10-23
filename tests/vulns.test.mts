@@ -91,3 +91,12 @@ test("findingsOf / heavyOf は、結果が無い・対象でない・まだ照�
   assert.equal(v.heavyOf(report, undefined, []), 0);
   assert.deepEqual(v.findingsOf(null, "a"), []);
 });
+
+test("LockWatch の版で使える機能を決める", () => {
+  assert.equal(v.hasAssess("0.4.0"), false);
+  assert.equal(v.hasAssess("0.5.0"), true);
+  assert.equal(v.hasAssess("0.10.1"), true); // 文字の順ではなく数で比べる
+  assert.equal(v.hasAssess("1.0"), true);
+  assert.equal(v.lockwatchAtLeast("0.2.0", 0, 2), true);
+  assert.equal(v.lockwatchAtLeast("0.1.9", 0, 2), false);
+});

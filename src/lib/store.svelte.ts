@@ -1,7 +1,7 @@
 // アプリ全体の状態。設定・取り込み結果・更新中の表示。
 
 import * as api from "./api";
-import type { Config, Link, LockwatchStatus, Session, Snapshot, VulnReport } from "./types";
+import type { Assessed, Config, Link, LockwatchStatus, Session, Snapshot, VulnReport } from "./types";
 import * as tags_ from "./tags";
 
 export const app = $state({
@@ -27,6 +27,12 @@ export const app = $state({
   pullResult: null as { path: string; ok: boolean; text: string } | null,
   /** 状態タブで開くプロジェクト (ほかのタブから飛ぶとき)。状態タブが受け取ったら null に戻す */
   jumpTo: null as string | null,
+  /** 「影響を調べる」(LockWatch の assess) を動かしているリポジトリ (LocalRepo.id)。画面を移っても続く */
+  assessing: [] as string[],
+  /** 前回の「影響を調べる」の HTML (LocalRepo.id ごと)。まだ聞いていなければ無い */
+  assessed: {} as Record<string, Assessed>,
+  /** 最後に失敗したときの理由 (LocalRepo.id ごと) */
+  assessError: {} as Record<string, string>,
 });
 
 /** 画面の好み (その端末だけ)。失われても困らないものだけ置く */
@@ -295,6 +301,31 @@ export async function loadVulns() {
       dbDownloadedAt: null,
       byRepo: {},
     };
+  }
+}
+
+/** 前回の「影響を調べる」の HTML を聞く (Claude は動かさない)。聞けなければ黙って何も出さない */
+export async function loadAssessed(repoId: string) {
+  try {
+    app.assessed[repoId] = await api.lockwatchAssessLast(repoId);
+  } catch {
+    delete app.assessed[repoId];
+  }
+}
+
+/** 影響を Claude Code に調べさせて HTML を開く (again)。again が false なら前回の HTML を開くだけ */
+export async function runAssess(repoId: string, again: boolean) {
+  if (app.assessing.includes(repoId)) return;
+  delete app.assessError[repoId];
+  if (again) app.assessing.push(repoId);
+  try {
+    const path = await api.lockwatchAssess(repoId, again);
+    if (again) toast(`影響を調べ終わり、ブラウザで開きました: ${path}`);
+  } catch (e) {
+    app.assessError[repoId] = errorText(e);
+  } finally {
+    app.assessing = app.assessing.filter((x) => x !== repoId);
+    await loadAssessed(repoId);
   }
 }
 

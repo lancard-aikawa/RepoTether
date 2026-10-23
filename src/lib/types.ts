@@ -277,6 +277,16 @@ export interface LockwatchStatus {
   task: { name: string; registered: boolean | null };
 }
 
+/** 前回の「影響を調べる」の HTML (LockWatch の assess --last の答え) */
+export interface Assessed {
+  path: string;
+  exists: boolean;
+  /** ファイルの更新時刻。無ければ null */
+  madeAt: string | null;
+  /** そのとき渡した脆弱性と今の結果の中身が違うか (照合の時刻だけの違いは false)。比べられなければ null */
+  changed: boolean | null;
+}
+
 /** 「今すぐ調べる」の事前チェック (LockWatch の scan --check) の答え */
 export interface VulnCheck {
   id: string;

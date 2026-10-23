@@ -204,6 +204,39 @@ async fn lockwatch_scan(app: AppHandle, repo_id: String, fresh: Option<bool>) ->
     .map_err(|e| e.to_string())?
 }
 
+/// 前回の「影響を調べる」の HTML (無ければ exists: false)。Claude は動かさない
+#[tauri::command]
+async fn lockwatch_assess_last(app: AppHandle, repo_id: String) -> Result<core::lockwatch::Assessed, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (runner, id) = lockwatch_target(&app.state::<AppState>(), &repo_id)?;
+        core::lockwatch::assess_last(&runner, &id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// そのリポジトリの脆弱性がビルド・リリースにどう効くかを LockWatch から Claude Code に調べさせ、
+/// 書いた HTML を既定のブラウザで開く (数分かかる)。again が false なら調べずに前回の HTML を開く
+#[tauri::command]
+async fn lockwatch_assess(app: AppHandle, repo_id: String, again: bool) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (runner, id) = lockwatch_target(&app.state::<AppState>(), &repo_id)?;
+        let path = if again {
+            core::lockwatch::assess_one(&runner, &id)?
+        } else {
+            let last = core::lockwatch::assess_last(&runner, &id)?;
+            if !last.exists {
+                return Err("まだ調べていません".into());
+            }
+            PathBuf::from(last.path)
+        };
+        launch::folder(&path)?;
+        Ok(util::display_path(&path.to_string_lossy()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// トークンは返さない (資格情報マネージャーにあるかどうかだけ)
 #[tauri::command]
 fn get_config(state: State<AppState>) -> Config {
@@ -698,7 +731,9 @@ pub fn run() {
             lockwatch_open_gui,
             lockwatch_check,
             lockwatch_scan,
-            lockwatch_share
+            lockwatch_share,
+            lockwatch_assess,
+            lockwatch_assess_last
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -26,6 +26,7 @@
   } from "$lib/store.svelte";
   import { hostOf, normalizeUrl, titleCandidate } from "$lib/links";
   import * as vulnsLib from "$lib/vulns";
+  import AssessBlock from "./AssessBlock.svelte";
   import ProjectActions from "./ProjectActions.svelte";
   import ReadmeView from "./ReadmeView.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
@@ -1042,6 +1043,9 @@
               <span class="muted">{when(res.scannedAt)} / {MODE_LABEL[res.mode] ?? res.mode}</span>
             </p>
             <p class="muted small mono">{res.lockfiles.join(", ")}</p>
+            {#if project.local && (vulnAll.some((f) => !f.informational) || res.runtimes.some(vulnsLib.runtimeAttention))}
+              <AssessBlock repoId={project.local.id} visibility={vulns.visibility} {now} />
+            {/if}
             {#if vulnChoices.length}
               <div class="hide-row small">
                 <span class="muted">隠す:</span>

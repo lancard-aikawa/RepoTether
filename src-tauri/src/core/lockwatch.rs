@@ -23,6 +23,8 @@ use super::{sessionvault, util};
 /// 1 つの照合は 2〜15 秒。脆弱性 DB の取り直し (数百 MB) が重なっても足りるだけ待つ
 const SCAN_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const CONFIG_TIMEOUT: Duration = Duration::from_secs(30);
+/// Claude Code にリポジトリを読ませる (`assess`)。1 回で数分。LockWatch の側の打ち切り (30 分) より少し長く待つ
+const ASSESS_TIMEOUT: Duration = Duration::from_secs(35 * 60);
 
 /// LockWatch の呼び方 (`python -m lockwatch`)
 #[derive(Debug, Clone, PartialEq)]
@@ -647,10 +649,69 @@ pub fn share_report(r: &Runner, loc: &Locations) -> Result<PathBuf, String> {
     Ok(loc.data_dir.join("share").join("index.html"))
 }
 
+// ---- ビルド・リリースへの影響 (`lockwatch assess`。LockWatch の design.md §7.3) ----
+
+/// `assess --id <id> --last` の答え: 前回書いた HTML
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct Assessed {
+    pub path: String,
+    pub exists: bool,
+    pub made_at: Option<String>,
+    /// そのとき渡した脆弱性と今の結果の中身が違うか (照合の時刻だけの違いは false)。比べられなければ None
+    pub changed: Option<bool>,
+}
+
+/// assess の無い古い LockWatch では argparse が「invalid choice」で断る
+fn assess_error(o: &Output, fallback: &str) -> String {
+    if o.stderr.contains("invalid choice: 'assess'") {
+        return "この LockWatch には「影響を調べる」がありません (0.5.0 から)。LockWatch を更新してください (git pull と uv sync)".into();
+    }
+    error_line(o, fallback)
+}
+
+/// 前回の HTML の場所と時刻 (Claude は動かさない)
+pub fn assess_last(r: &Runner, target_id: &str) -> Result<Assessed, String> {
+    let o = run(r, &["assess", "--id", target_id, "--last"], CONFIG_TIMEOUT)?;
+    if o.code != Some(0) {
+        return Err(assess_error(&o, "LockWatch が答えませんでした"));
+    }
+    serde_json::from_str(&o.stdout).map_err(|e| format!("LockWatch の答えを読めません: {e}"))
+}
+
+/// そのリポジトリの脆弱性がビルド・リリースにどう効くかを、LockWatch から Claude Code に調べさせる。書いた HTML の場所を返す
+pub fn assess_one(r: &Runner, target_id: &str) -> Result<PathBuf, String> {
+    let o = run(r, &["assess", "--id", target_id], ASSESS_TIMEOUT)?;
+    if o.code != Some(0) {
+        return Err(assess_error(&o, "影響を調べられませんでした"));
+    }
+    written_path(&o.stdout).ok_or_else(|| "LockWatch が書いた場所を答えませんでした".to_string())
+}
+
+/// 「書きました: <場所>」の行
+fn written_path(stdout: &str) -> Option<PathBuf> {
+    stdout.lines().rev().find_map(|l| l.trim().strip_prefix("書きました: ")).map(PathBuf::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::model::Remote;
+
+    #[test]
+    fn assess_output() {
+        let out = "Claude Code に調べさせています（2 パッケージ・0 言語。数分かかります）…\n書きました: C:/lw/data/assess/r.html\n";
+        assert_eq!(written_path(out), Some(PathBuf::from("C:/lw/data/assess/r.html")));
+        assert_eq!(written_path("何も書いていない\n"), None);
+        let old = Output {
+            code: Some(2),
+            stdout: String::new(),
+            stderr: "usage: lockwatch\nlockwatch: error: argument command: invalid choice: 'assess'".into(),
+        };
+        assert!(assess_error(&old, "x").contains("0.5.0"));
+        let v: Assessed = serde_json::from_str(r#"{"path": "C:/a.html", "exists": true, "made_at": "2026-10-23T09:00:00+09:00"}"#).unwrap();
+        assert_eq!((v.exists, v.made_at.as_deref()), (true, Some("2026-10-23T09:00:00+09:00")));
+    }
 
     fn local(path: &str, remotes: &[(&str, Option<&str>)]) -> LocalRepo {
         LocalRepo {

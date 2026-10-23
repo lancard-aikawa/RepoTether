@@ -119,6 +119,16 @@ export function noticeText(n: Pick<VulnNotice, "kind" | "detail">): string {
   }
 }
 
+/** LockWatch の版 ("0.5.0") が major.minor 以上か。使える機能を版で決める (古い LockWatch では押せないようにする) */
+export function lockwatchAtLeast(version: string, major: number, minor: number): boolean {
+  const [a, b] = version.split(".").map((x) => Number.parseInt(x, 10) || 0);
+  return a > major || (a === major && (b ?? 0) >= minor);
+}
+
+/** 「影響を調べる」(lockwatch assess) は LockWatch 0.5.0 から */
+export const ASSESS_SINCE = "0.5.0";
+export const hasAssess = (version: string) => lockwatchAtLeast(version, 0, 5);
+
 // ---- 言語そのものの版 (LockWatch の design.md §3.6) ----
 
 export const RUNTIME_LABEL: Record<string, string> = { php: "PHP", node: "Node.js" };

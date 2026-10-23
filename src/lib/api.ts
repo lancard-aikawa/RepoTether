@@ -10,6 +10,7 @@ import type {
   Snapshot,
   TranscriptEntry,
   VulnCheck,
+  Assessed,
   VulnReport,
 } from "./types";
 
@@ -275,6 +276,19 @@ export async function lockwatchScan(repoId: string, fresh = false): Promise<Vuln
 export async function lockwatchShare(): Promise<string> {
   if (!inTauri) throw new Error("ブラウザ表示では作れません");
   return call("lockwatch_share");
+}
+
+/** 前回の「影響を調べる」の HTML (Claude は動かさない)。repoId は LocalRepo.id */
+export async function lockwatchAssessLast(repoId: string): Promise<Assessed> {
+  if (!inTauri) return { path: "", exists: false, madeAt: null, changed: null };
+  return call("lockwatch_assess_last", { repoId });
+}
+
+/** 脆弱性がビルド・リリースにどう効くかを LockWatch から Claude Code に調べさせ、HTML をブラウザで開く (数分かかる)。
+ * again が false なら調べずに前回の HTML を開く。開いた HTML の場所を返す */
+export async function lockwatchAssess(repoId: string, again: boolean): Promise<string> {
+  if (!inTauri) throw new Error("ブラウザ表示では調べられません");
+  return call("lockwatch_assess", { repoId, again });
 }
 
 /** ファイル選択ダイアログ。キャンセルなら null */
