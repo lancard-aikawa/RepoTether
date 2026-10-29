@@ -301,11 +301,13 @@ export interface ToolItem {
   name: string;
   installed: string | null;
   latest: string | null;
+  /** latest の公開日 (YYYY-MM-DD。ToolKeeper 0.2.0 から)。分からなければ null */
+  latestDate: string | null;
   updatable: boolean;
   eol: { product: string; cycle: string; date: string | null; state: "ended" | "soon" | "ok" } | null;
   /** 前回調べたときに無かった更新 */
   new: boolean;
-  /** twin:<key>・pinned・pinned:<件数>・running:<名前>・manual・old:<版> */
+  /** twin:<key>・pinned・pinned:<件数>・running:<名前>・manual・old:<版>・same */
   notes: string[];
   packages: { installed: number; outdated: number; names: string[] } | null;
 }
@@ -314,7 +316,8 @@ export interface ToolCheck {
   schema: number;
   toolkeeper: string;
   checkedAt: string;
-  summary: { updatable: number; eol: number; new: number; failed: number };
+  /** env は環境変数と PATH で「切れている」と注意の数 (ToolKeeper 0.2.0 から) */
+  summary: { updatable: number; eol: number; new: number; failed: number; env: number };
   items: ToolItem[];
   failed: { source: string; reason: string }[];
 }

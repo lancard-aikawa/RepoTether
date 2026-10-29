@@ -64,7 +64,9 @@ export function noteParts(it: ToolItem): string[] {
             ? `古い版 ${val} も入っている`
             : kind === "running"
               ? `動いている: ${val}`
-              : kind === "pinned"
+              : kind === "same"
+                ? "winget は更新ありと出すが、版の書き方が違うだけで最新"
+                : kind === "pinned"
                 ? val
                   ? `pin ${val} 件`
                   : "pin"

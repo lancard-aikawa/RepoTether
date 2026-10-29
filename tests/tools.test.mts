@@ -68,6 +68,9 @@ test("noteParts は ToolKeeper の言葉にそろえる", () => {
   assert.deepEqual(t.noteParts(check.items[6]), ["winget でも見えている (GitHub.cli)"]);
   assert.deepEqual(t.noteParts(item("winget:(pinned)", "C", { notes: ["pinned:1"] })), ["pin 1 件"]);
   assert.deepEqual(t.noteParts(item("cygwin", "A", { notes: ["running:mintty.exe"] })), ["動いている: mintty.exe"]);
+  assert.deepEqual(t.noteParts(item("winget:Microsoft.OpenJDK.21", "B", { updatable: false, notes: ["same"] })), [
+    "winget は更新ありと出すが、版の書き方が違うだけで最新",
+  ]);
 });
 
 test("isStale は 8 日より前を止まっているとみなす", () => {

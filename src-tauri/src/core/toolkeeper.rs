@@ -155,6 +155,8 @@ pub struct Summary {
     /// 前回の check に無かった更新の数
     pub new: u32,
     pub failed: u32,
+    /// 環境変数と PATH で「切れている」と注意の数 (ToolKeeper 0.2.0 から。無ければ 0)
+    pub env: u32,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -185,10 +187,12 @@ pub struct Item {
     pub name: String,
     pub installed: Option<String>,
     pub latest: Option<String>,
+    /// latest の公開日 (YYYY-MM-DD。ToolKeeper 0.2.0 から。分からなければ None)
+    pub latest_date: Option<String>,
     pub updatable: bool,
     pub eol: Option<Eol>,
     pub new: bool,
-    /// twin:<key>・pinned・pinned:<件数>・running:<名前>・manual・old:<版>
+    /// twin:<key>・pinned・pinned:<件数>・running:<名前>・manual・old:<版>・same
     pub notes: Vec<String>,
     pub packages: Option<Packages>,
 }
@@ -289,6 +293,23 @@ mod tests {
         assert_eq!(c.items[1].packages.as_ref().unwrap().installed, 80);
         assert_eq!(c.items[2].installed, None, "版の無い行も読む");
         assert_eq!(c.failed[0].source, "choco");
+        // ToolKeeper 0.1.0 の結果には latest_date と summary.env が無い
+        assert_eq!(c.items[0].latest_date, None);
+        assert_eq!(c.summary.env, 0);
+    }
+
+    #[test]
+    fn reads_release_date_and_env_count() {
+        let v2 = CHECK
+            .replacen("\"failed\": 0}", "\"failed\": 0, \"env\": 3}", 1)
+            .replacen("\"latest\": \"20.20.2\",", "\"latest\": \"20.20.2\", \"latest_date\": \"2026-03-24\",", 1);
+        let c = parse_check(&v2).unwrap();
+        assert_eq!(c.summary.env, 3);
+        assert_eq!(c.items[0].latest_date.as_deref(), Some("2026-03-24"));
+        // 画面には camelCase で渡す
+        let out = serde_json::to_value(&c).unwrap();
+        assert_eq!(out["items"][0]["latestDate"], "2026-03-24");
+        assert_eq!(out["summary"]["env"], 3);
     }
 
     #[test]

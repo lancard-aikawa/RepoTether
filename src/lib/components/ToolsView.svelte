@@ -118,6 +118,7 @@
           <span class="badge info" title="ToolKeeper の画面で選んで上げられる数 (区分 A・B)">更新できる {check.summary.updatable}</span>
           {#if check.summary.eol}<span class="badge high" title="系列のサポートが終わった・90 日以内に終わる">サポート終了 {check.summary.eol}</span>{/if}
           {#if check.summary.new}<span class="badge mid" title="前回調べたときに無かった更新">新しい {check.summary.new}</span>{/if}
+          {#if check.summary.env}<span class="badge mid" title="PATH や環境変数が無い場所を指している・更新で切れうる。中身は ToolKeeper の画面の「環境」のタブで">環境の注意 {check.summary.env}</span>{/if}
         {/if}
         <span class="spacer"></span>
         {#if check}
@@ -160,7 +161,7 @@
         {:else}
           <table class="tools">
             <thead>
-              <tr><th>区分</th><th>名前</th><th>入っている版</th><th>最新</th><th>注意</th></tr>
+              <tr><th>区分</th><th>名前</th><th>入っている版</th><th>最新</th><th>公開日</th><th>注意</th></tr>
             </thead>
             <tbody>
               {#each items as it (it.key)}
@@ -172,6 +173,7 @@
                   </td>
                   <td class="mono">{it.installed ?? "-"}</td>
                   <td class="mono">{it.latest ?? "-"}</td>
+                  <td class="mono" title="最新の版が公開された日">{it.latestDate ?? "-"}</td>
                   <td class="c-note">
                     {#if it.eol && it.eol.state !== "ok"}
                       <span class="badge {it.eol.state === 'ended' ? 'high' : 'mid'}">{toolsLib.noteParts(it)[0]}</span>
