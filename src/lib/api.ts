@@ -8,6 +8,8 @@ import type {
   LockwatchStatus,
   SessionFinding,
   Snapshot,
+  ToolkeeperStatus,
+  ToolsReport,
   TranscriptEntry,
   VulnCheck,
   Assessed,
@@ -20,6 +22,8 @@ export const LOCKWATCH_URL = "https://github.com/lancard-aikawa/LockWatch";
 export const OSV_SCANNER_INSTALL = "winget install --id Google.OSVScanner --version 2.6.0 --exact";
 /** LockWatch の定期実行を登録するコマンド (LockWatch のフォルダで)。pwsh は入っていない環境があるので、Windows に最初からある powershell で書く */
 export const LOCKWATCH_REGISTER = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\register-task.ps1";
+/** ToolKeeper の定期実行 (週 1 回、調べるだけ) を登録するコマンド (ToolKeeper のフォルダで)。LockWatch と同じ書き方 */
+export const TOOLKEEPER_REGISTER = LOCKWATCH_REGISTER;
 
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -66,6 +70,7 @@ const mockConfig: Config = {
   starred: [],
   sessionvaultPath: null,
   lockwatchPath: null,
+  toolkeeperPath: null,
   externalTools: [],
   links: {},
   shareLocations: [],
@@ -84,6 +89,8 @@ type MockHooks = {
   __mockVulns?: VulnReport;
   __mockVulnCheck?: VulnCheck;
   __mockLockwatchStatus?: LockwatchStatus;
+  __mockTools?: ToolsReport;
+  __mockToolkeeperStatus?: ToolkeeperStatus;
   __mockPull?: PullResult | string;
   __mockPullDelay?: number;
   /** パス → アイコンの URL (data: など) */
@@ -254,6 +261,28 @@ export async function lockwatchStatus(path?: string | null): Promise<LockwatchSt
 export async function lockwatchOpenGui(path?: string | null): Promise<void> {
   if (!inTauri) throw new Error("ブラウザ表示では開けません");
   return call("lockwatch_open_gui", { path: path ?? null });
+}
+
+/** ToolKeeper の結果 (PC に入れた道具の版)。ToolKeeper を使わない設定なら configured: false */
+export async function toolkeeperResults(): Promise<ToolsReport> {
+  if (!inTauri) return hooks().__mockTools ?? { configured: false, error: null, check: null };
+  return call("toolkeeper_results");
+}
+
+/** ToolKeeper が使える状態か。path を渡せばその場所 (保存前の入力)、省けば設定の場所 */
+export async function toolkeeperStatus(path?: string | null): Promise<ToolkeeperStatus> {
+  if (!inTauri) {
+    const given = hooks().__mockToolkeeperStatus;
+    if (given) return given;
+    throw new Error("ブラウザ表示では確かめられません");
+  }
+  return call("toolkeeper_status", { path: path ?? null });
+}
+
+/** ToolKeeper の画面 (一覧・更新・履歴) を開く。道具の更新はそこでする */
+export async function toolkeeperOpenGui(path?: string | null): Promise<void> {
+  if (!inTauri) throw new Error("ブラウザ表示では開けません");
+  return call("toolkeeper_open_gui", { path: path ?? null });
 }
 
 /** 「今すぐ調べる」の事前チェック: 今照合したら前回の結果がそのまま返るか (照合はしない) */

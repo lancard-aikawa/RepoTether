@@ -14,6 +14,7 @@ pub mod remote;
 pub mod secrets;
 pub mod sessions;
 pub mod sessionvault;
+pub mod toolkeeper;
 pub mod util;
 
 use std::collections::{BTreeMap, HashMap};

@@ -440,6 +440,7 @@ function buildConfig() {
     tagDefs: ["仕事", "仕事/ACME", "仕事/社内", "自作", "自作/アプリ", "自作/ツール", "自作/サイト", "自作/設定"],
     starred,
     lockwatchPath: "C:\\Tools\\LockWatch",
+    toolkeeperPath: "C:\\Tools\\ToolKeeper",
     externalTools: [{ id: "tool1", label: "MdExplorer", command: "C:\\Tools\\fastmd-explorer.exe", args: "" }],
     links: Object.fromEntries(Object.entries(LINKS).map(([p, v]) => [key(p), v])),
   };
@@ -529,6 +530,48 @@ const LOCKWATCH_STATUS = {
   task: { name: "LockWatch", registered: true },
 };
 
+// ---- 道具 (ToolKeeper の check.json と status --json。架空の PC) ----
+/** 「もうすぐサポート終了」(90 日以内) に見える日付 */
+const NEXT_MONTH = new Date(NOW + 50 * DAY).toISOString().slice(0, 10);
+const tool =(key, tier, name, installed, latest, over = {}) => ({
+  key, tier, name, installed, latest, updatable: installed !== latest, eol: null, new: false, notes: [], packages: null, ...over,
+});
+const TOOL_ITEMS = [
+  tool("winget:OpenJS.NodeJS.20", "E", "Node.js", "20.9.0", "20.20.2", { eol: { product: "nodejs", cycle: "20", date: "2026-04-30", state: "ended" } }),
+  tool("cygwin", "A", "Cygwin", "3.6.12-1", "3.6.12-1", { packages: { installed: 80, outdated: 0, names: [] } }),
+  tool("ghostscript", "A", "Ghostscript", "10.05.1", "10.08.0", { new: true }),
+  tool("winget:Kitware.CMake", "B", "CMake", "4.1.0", "4.4.4"),
+  tool("winget:Gyan.FFmpeg", "B", "FFmpeg", "8.1", "9.0.2"),
+  tool("winget:GitHub.cli", "B", "GitHub CLI", "2.87.2", "2.103.3"),
+  tool("winget:Microsoft.OpenJDK.17", "B", "Microsoft Build of OpenJDK 17", "17.0.17.10", "17.0.21.1021", {
+    eol: { product: "microsoft-build-of-openjdk", cycle: "17", date: NEXT_MONTH, state: "soon" },
+  }),
+  tool("winget:Python.Python.3.14", "B", "Python 3.14.0 (64-bit)", "3.14.0", "3.14.7"),
+  tool("winget:Microsoft.WSL", "C", "Linux 用 Windows サブシステム", "2.3.26.0", "2.7.14"),
+  tool("winget:SlackTechnologies.Slack", "C", "Slack", "4.52.182", "4.53.269"),
+  tool("choco:gh", "D", "gh", "2.87.2", "2.103.3", { notes: ["twin:winget:GitHub.cli"] }),
+];
+const TOOLS = {
+  configured: true,
+  error: null,
+  check: {
+    schema: 1,
+    toolkeeper: "0.1.0",
+    checkedAt: iso(at(1, 9, 0)),
+    summary: { updatable: 6, eol: 2, new: 1, failed: 0 },
+    items: TOOL_ITEMS,
+    failed: [],
+  },
+};
+const TOOLKEEPER_STATUS = {
+  toolkeeper: "0.1.0",
+  schema: 1,
+  dataDir: "C:\\Tools\\ToolKeeper\\data",
+  lastCheck: iso(at(1, 9, 0)),
+  task: { registered: true },
+  sources: { winget: "1.29.380", choco: "2.5.1", cygwin: "C:\\cygwin64", ghostscript: true },
+};
+
 // ---- 開発サーバー ----
 async function up() {
   try {
@@ -578,10 +621,12 @@ async function main() {
       page.setDefaultTimeout(8000);
       await page.route("**/dev-snapshot.json", (route) => route.fulfill({ json: snapshot }));
       await page.addInitScript(
-        ({ config, readme, prefs, transcript, icons, linkIcons, vulns, lockwatchStatus }) => {
+        ({ config, readme, prefs, transcript, icons, linkIcons, vulns, lockwatchStatus, tools, toolkeeperStatus }) => {
           window.__mockConfig = config;
           window.__mockVulns = vulns;
           window.__mockLockwatchStatus = lockwatchStatus;
+          window.__mockTools = tools;
+          window.__mockToolkeeperStatus = toolkeeperStatus;
           window.__mockLinkIcons = linkIcons;
           // マニュアルには「ブラウザ表示」の印を出さない。開発サーバーが起動直後にページを読み込み直しても
           // 消えないよう、読み込みのたびに入れる
@@ -606,6 +651,8 @@ async function main() {
           linkIcons: LINK_ICONS,
           vulns,
           lockwatchStatus: LOCKWATCH_STATUS,
+          tools: TOOLS,
+          toolkeeperStatus: TOOLKEEPER_STATUS,
           prefs,
           transcript: TRANSCRIPT.map((e, i) => ({ at: transcriptTimes[i], tools: [], ...e })),
         },
@@ -681,6 +728,7 @@ async function main() {
       ["graph", "11_graph.png"],
       ["report", "12_report.png"],
       ["vulns", "19_vulns.png"],
+      ["tools", "20_tools.png"],
     ]) {
       page = await open({ tab });
       await shot(page, file);

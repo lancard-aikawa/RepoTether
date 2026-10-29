@@ -1,7 +1,7 @@
 // アプリ全体の状態。設定・取り込み結果・更新中の表示。
 
 import * as api from "./api";
-import type { Assessed, Config, Link, LockwatchStatus, Session, Snapshot, VulnReport } from "./types";
+import type { Assessed, Config, Link, LockwatchStatus, Session, Snapshot, ToolsReport, VulnReport } from "./types";
 import * as tags_ from "./tags";
 
 export const app = $state({
@@ -21,6 +21,8 @@ export const app = $state({
   vulns: null as VulnReport | null,
   /** LockWatch が使える状態か (osv-scanner・定期実行など)。脆弱性タブの案内に使う。まだ確かめていなければ null */
   lockwatchStatus: null as LockwatchStatus | null,
+  /** ToolKeeper の結果 (PC に入れた道具の版)。ToolKeeper を使わない設定なら configured: false。まだ読んでいなければ null */
+  tools: null as ToolsReport | null,
   /** pull しているリポジトリのパス。このあいだは更新 (自動も) をしない */
   pulling: null as string | null,
   /** 最後の pull の結果 (リポジトリのパスごとに、詳細パネルの「リポジトリ」タブに出す) */
@@ -93,7 +95,7 @@ export function applyTheme() {
   });
 }
 
-export type Tab = "state" | "history" | "report" | "vulns" | "graph" | "settings";
+export type Tab = "state" | "history" | "report" | "vulns" | "tools" | "graph" | "settings";
 
 /** 状態タブでそのプロジェクトの詳細パネルを開く (脆弱性タブなどから) */
 export function openProject(key: string, detailTab?: DetailTab) {
@@ -255,6 +257,19 @@ export async function refresh(includeRemote: boolean, scope: api.RefreshScope = 
   }
   // 結果は LockWatch の定期実行で変わるので、更新のたびに読み直す (targets.json も今の一覧にそろう)
   await loadVulns();
+  // ToolKeeper の結果も定期実行 (週 1 回) と ToolKeeper の画面で変わるので、同じく読み直す
+  await loadTools();
+}
+
+// ---- 道具 (ToolKeeper) ----
+
+/** ToolKeeper の結果を読み直す。失敗は結果の error に入る (画面の更新は止めない) */
+export async function loadTools() {
+  try {
+    app.tools = await api.toolkeeperResults();
+  } catch (e) {
+    app.tools = { configured: true, error: errorText(e), check: null };
+  }
 }
 
 // ---- pull ----

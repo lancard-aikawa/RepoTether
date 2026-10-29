@@ -23,6 +23,8 @@ struct AppState {
     known_repos: Mutex<std::collections::HashSet<String>>,
     /// LockWatch のデータの場所。Python を起動して聞くので、設定の「LockWatch の場所」ごとに覚えておく
     lockwatch_locations: Mutex<Option<(String, core::lockwatch::Locations)>>,
+    /// ToolKeeper のデータの場所。同じく Python を起動して聞くので、設定の「ToolKeeper の場所」ごとに覚えておく
+    toolkeeper_data: Mutex<Option<(String, PathBuf)>>,
 }
 
 impl AppState {
@@ -157,6 +159,86 @@ async fn lockwatch_open_gui(app: AppHandle, path: Option<String>) -> Result<(), 
         // LockWatch の画面で場所を変えるかもしれないので、覚えている場所は捨てて次に聞き直す
         *state.lockwatch_locations.lock().unwrap() = None;
         core::lockwatch::open_gui(&core::lockwatch::resolve(&dir)?)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ---- ToolKeeper (PC に入れた道具の版。見るだけ) ----
+
+/// 画面から渡された場所か、無ければ設定の ToolKeeper の場所
+fn toolkeeper_dir(state: &AppState, path: Option<String>) -> Result<String, String> {
+    match path.filter(|p| !p.trim().is_empty()) {
+        Some(p) => Ok(p),
+        None => state
+            .config
+            .lock()
+            .unwrap()
+            .toolkeeper_path
+            .clone()
+            .filter(|p| !p.trim().is_empty())
+            .ok_or_else(|| "ToolKeeper の場所が決まっていません".to_string()),
+    }
+}
+
+/// ToolKeeper の結果 (check.json)。データの場所は status で聞いて、設定の場所ごとに覚えておく
+fn toolkeeper_report(state: &AppState) -> core::toolkeeper::ToolsReport {
+    use core::toolkeeper::ToolsReport;
+    let Ok(dir) = toolkeeper_dir(state, None) else { return ToolsReport::default() };
+    let fail = |e: String| ToolsReport { configured: true, error: Some(e), check: None };
+    let cached = state.toolkeeper_data.lock().unwrap().clone().filter(|(d, _)| *d == dir).map(|(_, p)| p);
+    let data = match cached {
+        Some(p) => p,
+        None => {
+            let status = match core::toolkeeper::resolve(&dir).and_then(|r| core::toolkeeper::status(&r)) {
+                Ok(s) => s,
+                Err(e) => return fail(e),
+            };
+            let p = PathBuf::from(&status.data_dir);
+            *state.toolkeeper_data.lock().unwrap() = Some((dir, p.clone()));
+            p
+        }
+    };
+    match core::toolkeeper::read_check(&data.join("check.json")) {
+        Ok(check) => ToolsReport { configured: true, error: None, check },
+        Err(e) => fail(e),
+    }
+}
+
+#[tauri::command]
+async fn toolkeeper_results(app: AppHandle) -> Result<core::toolkeeper::ToolsReport, String> {
+    tauri::async_runtime::spawn_blocking(move || toolkeeper_report(&app.state::<AppState>()))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// ToolKeeper が使える状態か。path を渡せばその場所 (保存前に確かめる)、無ければ設定の場所。
+/// 設定の場所なら、覚えているデータの場所もこの答えで更新する (ToolKeeper の画面で場所を変えたときのため)
+#[tauri::command]
+async fn toolkeeper_status(app: AppHandle, path: Option<String>) -> Result<core::toolkeeper::Status, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let dir = toolkeeper_dir(&state, path)?;
+        let status = core::toolkeeper::status(&core::toolkeeper::resolve(&dir)?)?;
+        let configured = state.config.lock().unwrap().toolkeeper_path.clone();
+        if configured.as_deref().map(str::trim) == Some(dir.trim()) {
+            *state.toolkeeper_data.lock().unwrap() = Some((dir, PathBuf::from(&status.data_dir)));
+        }
+        Ok(status)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// ToolKeeper の画面を開く。道具の更新はそこでする (RepoTether からは update を呼ばない)
+#[tauri::command]
+async fn toolkeeper_open_gui(app: AppHandle, path: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let dir = toolkeeper_dir(&state, path)?;
+        // ToolKeeper の画面で場所を変えるかもしれないので、覚えている場所は捨てて次に聞き直す
+        *state.toolkeeper_data.lock().unwrap() = None;
+        core::toolkeeper::open_gui(&core::toolkeeper::resolve(&dir)?)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -698,6 +780,7 @@ pub fn run() {
                 pulling: Mutex::new(Default::default()),
                 known_repos: Mutex::new(Default::default()),
                 lockwatch_locations: Mutex::new(None),
+                toolkeeper_data: Mutex::new(None),
             });
             Ok(())
         })
@@ -733,7 +816,10 @@ pub fn run() {
             lockwatch_scan,
             lockwatch_share,
             lockwatch_assess,
-            lockwatch_assess_last
+            lockwatch_assess_last,
+            toolkeeper_results,
+            toolkeeper_status,
+            toolkeeper_open_gui
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

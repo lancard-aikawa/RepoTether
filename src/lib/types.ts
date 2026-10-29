@@ -148,6 +148,8 @@ export interface Config {
   sessionvaultPath: string | null;
   /** LockWatch のリポジトリのフォルダ。null なら使わない (脆弱性のタブを出さない) */
   lockwatchPath: string | null;
+  /** ToolKeeper のリポジトリのフォルダ。null なら使わない (道具のタブには使い始め方だけを出す) */
+  toolkeeperPath: string | null;
   /** 外部ツール。VS Code などのボタンの横に並べ、プロジェクトのフォルダを渡して起動する */
   externalTools: ExternalTool[];
   /** プロジェクトの設定キー (Project.prefKey) -> 関連ページ (サービスの管理画面など) */
@@ -275,6 +277,55 @@ export interface LockwatchStatus {
   db: Record<string, string>;
   /** registered は Windows 以外・調べられないときは null */
   task: { name: string; registered: boolean | null };
+}
+
+/** ToolKeeper が使える状態か (toolkeeper status --json。ToolKeeper の design.md §9.2) */
+export interface ToolkeeperStatus {
+  /** ToolKeeper の版 */
+  toolkeeper: string;
+  /** ToolKeeper が書く check.json の形 */
+  schema: number;
+  dataDir: string;
+  /** 最後に調べた時刻。まだなら null */
+  lastCheck: string | null;
+  task: { registered: boolean };
+  sources: { winget: string | null; choco: string | null; cygwin: string | null; ghostscript: boolean };
+}
+
+/** 道具 1 つ (ToolKeeper の check.json の items。design.md §9.1) */
+export interface ToolItem {
+  /** winget:<ID>・choco:<名前>・php・ghostscript・cygwin */
+  key: string;
+  /** A 専用の処理・B winget の開発の道具・C winget の残り・D choco・E 大きい版の乗り換え */
+  tier: "A" | "B" | "C" | "D" | "E";
+  name: string;
+  installed: string | null;
+  latest: string | null;
+  updatable: boolean;
+  eol: { product: string; cycle: string; date: string | null; state: "ended" | "soon" | "ok" } | null;
+  /** 前回調べたときに無かった更新 */
+  new: boolean;
+  /** twin:<key>・pinned・pinned:<件数>・running:<名前>・manual・old:<版> */
+  notes: string[];
+  packages: { installed: number; outdated: number; names: string[] } | null;
+}
+
+export interface ToolCheck {
+  schema: number;
+  toolkeeper: string;
+  checkedAt: string;
+  summary: { updatable: number; eol: number; new: number; failed: number };
+  items: ToolItem[];
+  failed: { source: string; reason: string }[];
+}
+
+export interface ToolsReport {
+  /** 設定で ToolKeeper の場所が決まっているか */
+  configured: boolean;
+  /** ToolKeeper を呼べない・結果を読めないときの理由 */
+  error: string | null;
+  /** まだ調べていなければ null */
+  check: ToolCheck | null;
 }
 
 /** 前回の「影響を調べる」の HTML (LockWatch の assess --last の答え) */

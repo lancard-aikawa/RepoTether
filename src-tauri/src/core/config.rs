@@ -36,6 +36,9 @@ pub struct Config {
     /// LockWatch (lock ファイルの脆弱性を調べる CLI) のリポジトリのフォルダ。None なら使わない
     /// (targets.json を書かず、脆弱性のタブも出さない)
     pub lockwatch_path: Option<String>,
+    /// ToolKeeper (PC に入れた道具の版を調べる CLI) のリポジトリのフォルダ。None なら使わない
+    /// (道具のタブには使い始め方だけを出す)
+    pub toolkeeper_path: Option<String>,
     /// 外部ツール。VS Code / 端末 / フォルダ / Claude のボタンの横に並べ、プロジェクトのフォルダを渡して起動する
     pub external_tools: Vec<ExternalTool>,
     /// プロジェクトの関連ページ (サービスの管理画面など)。キーは hidden と同じ
@@ -134,6 +137,7 @@ impl Default for Config {
             starred: vec![],
             sessionvault_path: None,
             lockwatch_path: None,
+            toolkeeper_path: None,
             external_tools: vec![],
             links: BTreeMap::new(),
             share_locations: vec![],

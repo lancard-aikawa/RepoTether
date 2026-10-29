@@ -11,6 +11,8 @@
   import SettingsView from "$lib/components/SettingsView.svelte";
   import VulnsView from "$lib/components/VulnsView.svelte";
   import { heavyOf } from "$lib/vulns";
+  import { tabCount } from "$lib/tools";
+  import ToolsView from "$lib/components/ToolsView.svelte";
   import SessionTranscript from "$lib/components/SessionTranscript.svelte";
 
   const tabs: { id: Tab; label: string }[] = [
@@ -18,6 +20,7 @@
     { id: "history", label: "履歴" },
     { id: "report", label: "日報" },
     { id: "vulns", label: "脆弱性" },
+    { id: "tools", label: "道具" },
     { id: "graph", label: "グラフ" },
     { id: "settings", label: "設定" },
   ];
@@ -32,6 +35,8 @@
 
   /** 脆弱性タブに出す数: 緊急・高の合計 (「隠す」で隠したものは数えない) */
   const heavyTotal = $derived(visible.reduce((n, p) => n + heavyOf(app.vulns, p.local?.id, prefs.vulnHide), 0));
+  /** 道具タブに出す数: 更新できる道具とサポートが終わった道具 (ToolKeeper) */
+  const toolsTotal = $derived(tabCount(app.tools?.check));
 
   // 相対時刻の表示を 1 分ごとに進める
   let now = $state(Date.now());
@@ -64,6 +69,8 @@
           aria-selected={prefs.tab === t.id}
           onclick={() => selectTab(t.id)}
           >{t.label}{#if t.id === "vulns" && heavyTotal}<span class="tab-count num" title="緊急・高の脆弱性の数">{heavyTotal}</span
+            >{:else if t.id === "tools" && toolsTotal}<span class="tab-count num" title="更新できる道具とサポートが終わった道具の数 (ToolKeeper)"
+              >{toolsTotal}</span
             >{/if}</button
         >
       {/each}
@@ -141,6 +148,8 @@
       <ReportView projects={visible} />
     {:else if prefs.tab === "vulns"}
       <VulnsView projects={visible} {now} />
+    {:else if prefs.tab === "tools"}
+      <ToolsView {now} />
     {:else}
       <SettingsView {projects} />
     {/if}
