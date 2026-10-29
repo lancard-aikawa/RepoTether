@@ -534,19 +534,19 @@ const LOCKWATCH_STATUS = {
 /** 「もうすぐサポート終了」(90 日以内) に見える日付 */
 const NEXT_MONTH = new Date(NOW + 50 * DAY).toISOString().slice(0, 10);
 const tool =(key, tier, name, installed, latest, over = {}) => ({
-  key, tier, name, installed, latest, updatable: installed !== latest, eol: null, new: false, notes: [], packages: null, ...over,
+  key, tier, name, installed, latest, latestDate: null, updatable: installed !== latest, eol: null, new: false, notes: [], packages: null, ...over,
 });
 const TOOL_ITEMS = [
-  tool("winget:OpenJS.NodeJS.20", "E", "Node.js", "20.9.0", "20.20.2", { eol: { product: "nodejs", cycle: "20", date: "2026-04-30", state: "ended" } }),
+  tool("winget:OpenJS.NodeJS.20", "E", "Node.js", "20.9.0", "20.20.2", { latestDate: "2026-03-24", eol: { product: "nodejs", cycle: "20", date: "2026-04-30", state: "ended" } }),
   tool("cygwin", "A", "Cygwin", "3.6.12-1", "3.6.12-1", { packages: { installed: 80, outdated: 0, names: [] } }),
-  tool("ghostscript", "A", "Ghostscript", "10.05.1", "10.08.0", { new: true }),
-  tool("winget:Kitware.CMake", "B", "CMake", "4.1.0", "4.4.4"),
-  tool("winget:Gyan.FFmpeg", "B", "FFmpeg", "8.1", "9.0.2"),
-  tool("winget:GitHub.cli", "B", "GitHub CLI", "2.87.2", "2.103.3"),
+  tool("ghostscript", "A", "Ghostscript", "10.05.1", "10.08.0", { latestDate: "2026-09-08", new: true }),
+  tool("winget:Kitware.CMake", "B", "CMake", "4.1.0", "4.4.4", { latestDate: "2026-10-06" }),
+  tool("winget:Gyan.FFmpeg", "B", "FFmpeg", "8.1", "9.0.2", { latestDate: "2026-09-20" }),
+  tool("winget:GitHub.cli", "B", "GitHub CLI", "2.87.2", "2.103.3", { latestDate: "2026-10-15" }),
   tool("winget:Microsoft.OpenJDK.17", "B", "Microsoft Build of OpenJDK 17", "17.0.17.10", "17.0.21.1021", {
     eol: { product: "microsoft-build-of-openjdk", cycle: "17", date: NEXT_MONTH, state: "soon" },
   }),
-  tool("winget:Python.Python.3.14", "B", "Python 3.14.0 (64-bit)", "3.14.0", "3.14.7"),
+  tool("winget:Python.Python.3.14", "B", "Python 3.14.0 (64-bit)", "3.14.0", "3.14.7", { latestDate: "2026-10-07" }),
   tool("winget:Microsoft.WSL", "C", "Linux 用 Windows サブシステム", "2.3.26.0", "2.7.14"),
   tool("winget:SlackTechnologies.Slack", "C", "Slack", "4.52.182", "4.53.269"),
   tool("choco:gh", "D", "gh", "2.87.2", "2.103.3", { notes: ["twin:winget:GitHub.cli"] }),
@@ -556,15 +556,15 @@ const TOOLS = {
   error: null,
   check: {
     schema: 1,
-    toolkeeper: "0.1.0",
+    toolkeeper: "0.2.0",
     checkedAt: iso(at(1, 9, 0)),
-    summary: { updatable: 6, eol: 2, new: 1, failed: 0 },
+    summary: { updatable: 6, eol: 2, new: 1, failed: 0, env: 2 },
     items: TOOL_ITEMS,
     failed: [],
   },
 };
 const TOOLKEEPER_STATUS = {
-  toolkeeper: "0.1.0",
+  toolkeeper: "0.2.0",
   schema: 1,
   dataDir: "C:\\Tools\\ToolKeeper\\data",
   lastCheck: iso(at(1, 9, 0)),
