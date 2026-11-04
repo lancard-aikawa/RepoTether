@@ -649,6 +649,54 @@ pub fn share_report(r: &Runner, loc: &Locations) -> Result<PathBuf, String> {
     Ok(loc.data_dir.join("share").join("index.html"))
 }
 
+/// 診断書を書くのは数秒。リポジトリが数百あっても足りるだけ待つ
+const REPORT_TIMEOUT: Duration = Duration::from_secs(3 * 60);
+
+/// `report --hide` に書ける値 (LockWatch の fold.SEVERITIES と fold.INFORMATIONAL)。ほかの値を渡すと LockWatch が引数の誤りで断る
+const HIDE_CHOICES: [&str; 8] = ["critical", "high", "medium", "low", "unknown", "unmaintained", "unsound", "notice"];
+
+/// `lockwatch report --html` の引数。target_id があればそのリポジトリの 1 つだけ (index.html は書き直さない)
+fn report_args<'a>(hide: &'a [String], target_id: Option<&'a str>) -> Vec<&'a str> {
+    let mut args = vec!["report", "--html"];
+    let mut keys: Vec<&str> = hide.iter().map(String::as_str).filter(|k| HIDE_CHOICES.contains(k)).collect();
+    keys.sort_unstable();
+    keys.dedup();
+    for k in keys {
+        args.extend(["--hide", k]);
+    }
+    if let Some(id) = target_id {
+        args.extend(["--id", id]);
+    }
+    args
+}
+
+/// `n 件の診断書を書きました: <場所>` の場所 (最後に書いたもの。--id ならその診断書、全部なら index.html)
+fn written_report(stdout: &str) -> Option<PathBuf> {
+    stdout
+        .lines()
+        .rev()
+        .find_map(|l| l.split_once("診断書を書きました: ").map(|(_, p)| p.trim()))
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+}
+
+/// `lockwatch report --html`。診断書 (HTML) を `<data>/reports` に書き、開くファイルの場所を返す。照合はしない。
+/// hide は画面の「隠す」(LockWatch に無い値は渡さない)。target_id があればそのリポジトリの診断書だけを書く
+pub fn html_report(r: &Runner, loc: &Locations, hide: &[String], target_id: Option<&str>) -> Result<PathBuf, String> {
+    let o = run(r, &report_args(hide, target_id), REPORT_TIMEOUT)?;
+    if o.code != Some(0) {
+        if o.stderr.contains("unrecognized arguments: --html") {
+            return Err("この LockWatch には診断書がありません (0.3.0 から)。LockWatch を更新してください (git pull と uv sync)".into());
+        }
+        return Err(error_line(&o, "LockWatch が診断書を書けませんでした"));
+    }
+    match (written_report(&o.stdout), target_id) {
+        (Some(p), _) if p.is_file() => Ok(p),
+        (_, None) => Ok(loc.data_dir.join("reports").join("index.html")),
+        _ => Err("LockWatch が書いた診断書の場所が分かりません".into()),
+    }
+}
+
 // ---- ビルド・リリースへの影響 (`lockwatch assess`。LockWatch の design.md §7.3) ----
 
 /// `assess --id <id> --last` の答え: 前回書いた HTML
@@ -697,6 +745,21 @@ fn written_path(stdout: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::core::model::Remote;
+
+    #[test]
+    fn report_args_pass_known_hide_keys_once() {
+        let hide = vec!["low".to_string(), "bogus".into(), "unmaintained".into(), "low".into()];
+        assert_eq!(report_args(&hide, None), ["report", "--html", "--hide", "low", "--hide", "unmaintained"]);
+        assert_eq!(report_args(&[], Some("github.com/a/b")), ["report", "--html", "--id", "github.com/a/b"]);
+    }
+
+    #[test]
+    fn written_report_reads_last_path() {
+        let out = "古い診断書を消しました: C:\\d\\reports\\old.html\n3 件の診断書を書きました: C:\\d\\reports\\index.html\n";
+        assert_eq!(written_report(out), Some(PathBuf::from("C:\\d\\reports\\index.html")));
+        assert_eq!(written_report("1 件の診断書を書きました: /d/reports/a_b.html\n（--hide low で 2 件を除いています）\n"), Some(PathBuf::from("/d/reports/a_b.html")));
+        assert_eq!(written_report("何も書いていません\n"), None);
+    }
 
     #[test]
     fn assess_output() {

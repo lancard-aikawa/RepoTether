@@ -261,6 +261,32 @@ async fn lockwatch_share(app: AppHandle) -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// 診断書 (LockWatch の report --html) を書いて、既定のブラウザで開く。書いたファイルの場所を返す。
+/// repo_id (LocalRepo.id) があればそのリポジトリの診断書だけ、無ければ全部と一覧 (index.html)。hide は画面の「隠す」
+#[tauri::command]
+async fn lockwatch_report_html(app: AppHandle, hide: Vec<String>, repo_id: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let snap = core::load_snapshot(&state.snapshot_path()).ok_or("まだ取り込んでいません")?;
+        let (runner, loc, targets) = write_lockwatch_targets(&state, &snap)?.ok_or("LockWatch の場所が決まっていません")?;
+        let target_id = match &repo_id {
+            Some(rid) => Some(
+                targets
+                    .iter()
+                    .find(|(id, _)| id == rid)
+                    .map(|(_, t)| t.id.clone())
+                    .ok_or("このリポジトリは LockWatch の対象にありません (非表示にしたものは対象外です)")?,
+            ),
+            None => None,
+        };
+        let path = core::lockwatch::html_report(&runner, &loc, &hide, target_id.as_deref())?;
+        launch::folder(&path)?;
+        Ok(util::display_path(&path.to_string_lossy()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// 「今すぐ調べる」の事前チェック: 今照合したら前回の結果がそのまま返るか (照合はしない)
 #[tauri::command]
 async fn lockwatch_check(app: AppHandle, repo_id: String) -> Result<core::lockwatch::Check, String> {
@@ -815,6 +841,7 @@ pub fn run() {
             lockwatch_check,
             lockwatch_scan,
             lockwatch_share,
+            lockwatch_report_html,
             lockwatch_assess,
             lockwatch_assess_last,
             toolkeeper_results,

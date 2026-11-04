@@ -84,6 +84,53 @@ export function choiceLabel(k: string): string {
   return SEVERITY_LABEL[k] ?? INFORMATIONAL_LABEL[k] ?? k;
 }
 
+// ---- 脆弱性タブの絞り込み (名前などの文字とタグ) ----
+
+/** タグの絞り込みで「タグの無いもの」を選んだとき */
+export const NO_TAG = "#none";
+
+/** 大文字小文字と、パスの区切り (\ と /) を区別しない (format.ts の searchKey と同じ) */
+const key = (s: string) => s.toLowerCase().replace(/\\/g, "/");
+
+/**
+ * 文字の絞り込み。texts (名前・パス・タグ・リモートなど) か、脆弱性のパッケージ名・ID・別名のどれかに q が入っていれば当たり。
+ * q が空ならすべて当たり
+ */
+export function queryMatches(texts: readonly (string | null | undefined)[], findings: readonly VulnFinding[], q: string): boolean {
+  const k = key(q.trim());
+  if (!k) return true;
+  const hit = (s: string | null | undefined) => !!s && key(s).includes(k);
+  return texts.some(hit) || findings.some((f) => hit(f.package) || hit(f.id) || (f.aliases ?? []).some(hit));
+}
+
+/** タグの絞り込み。"仕事" を選ぶと "仕事/客先" の付いたものも当たる。"" はすべて、NO_TAG はタグの無いもの */
+export function tagMatches(tags: readonly string[], tag: string): boolean {
+  if (!tag) return true;
+  if (tag === NO_TAG) return tags.length === 0;
+  return tags.some((t) => t === tag || t.startsWith(tag + "/"));
+}
+
+/**
+ * タグの選択肢: 行に付いているタグとその上の階層を、order (設定のタグの並び) の順に、当たる行の数と一緒に。
+ * order に無いものは名前順で後ろに。選んでいるタグ (selected) は 0 件でも残す
+ */
+export function tagOptions(tagLists: readonly (readonly string[])[], order: readonly string[], selected = ""): { tag: string; count: number }[] {
+  const seen = new Set<string>();
+  for (const ts of tagLists)
+    for (const t of ts) {
+      const parts = t.split("/");
+      parts.forEach((_, i) => seen.add(parts.slice(0, i + 1).join("/")));
+    }
+  if (selected && selected !== NO_TAG) seen.add(selected);
+  const rank = (t: string) => {
+    const i = order.indexOf(t);
+    return i < 0 ? order.length : i;
+  };
+  return [...seen]
+    .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b, "ja"))
+    .map((tag) => ({ tag, count: tagLists.filter((ts) => tagMatches(ts, tag)).length }));
+}
+
 // ---- lock ファイルの健全性の注意 (LockWatch の design.md §3.5)。文は LockWatch の hygiene.describe と同じにする
 
 export const NOTICE_LABEL: Record<string, string> = {

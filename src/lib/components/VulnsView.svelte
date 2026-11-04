@@ -1,6 +1,12 @@
+<script lang="ts" module>
+  // 絞り込み (文字とタグ)。「詳細を開く」で状態タブへ移って戻っても残すよう、画面の外に置く (アプリを閉じると消える)
+  const filter = $state({ query: "", tag: "" });
+</script>
+
 <script lang="ts">
   // 脆弱性タブ。上に LockWatch の結果をプロジェクトごとに並べ、下に LockWatch の場所と状態を出す。
   // 行を押すと、その下に 1 件ずつの中身を広げる。「詳細を開く」で状態タブの詳細パネルの「脆弱性」タブへ移る。
+  // 「診断書」は LockWatch の report --html (LockWatch の画面の「診断書を出す」と同じ)。「隠す」で選んだものを除いて書く
   import { untrack } from "svelte";
   import type { Project } from "$lib/derive";
   import type { LockwatchStatus, RepoVulns, VulnFinding, VulnRuntime } from "$lib/types";
@@ -8,6 +14,8 @@
   import { relative, toMs } from "$lib/format";
   import { app, errorText, loadVulns, openProject, prefs, savePrefs, toast, updateConfig } from "$lib/store.svelte";
   import * as vulnsLib from "$lib/vulns";
+  import { definedTags } from "$lib/tags";
+  import type { Config } from "$lib/types";
   import AssessBlock from "./AssessBlock.svelte";
   import RepoIcon from "./RepoIcon.svelte";
 
@@ -68,10 +76,31 @@
   /** 見るべきもの: 脆弱性・注意があるか、照合できなかったもの */
   const flagged = $derived(rows.filter((r) => r.findings.length || r.notices || r.error || r.runtimes.length));
   let showAll = $state(false);
-  const shown = $derived(showAll ? rows : flagged);
+
+  // ---- 絞り込み (文字とタグ)。「問題の無いものも出す」と重ねて効く ----
+  const textsOf = (p: Project) => [p.name, p.path, ...p.tags, ...p.remotes.map((r) => r.fullName)];
+  const base = $derived(showAll ? rows : flagged);
+  const tagChoices = $derived(
+    vulnsLib.tagOptions(
+      base.map((r) => r.project.tags),
+      definedTags(app.config ?? ({} as Config)),
+      filter.tag,
+    ),
+  );
+  const noTagCount = $derived(base.filter((r) => !r.project.tags.length).length);
+  const filtering = $derived(!!filter.query.trim() || !!filter.tag);
+  const shown = $derived(
+    base.filter((r) => vulnsLib.tagMatches(r.project.tags, filter.tag) && vulnsLib.queryMatches(textsOf(r.project), r.findings, filter.query)),
+  );
+
+  function clearFilter() {
+    filter.query = "";
+    filter.tag = "";
+  }
 
   const rawFindings = $derived(projects.flatMap((p) => vulnsLib.findingsOf(app.vulns, p.local?.id)));
-  const totals = $derived(vulnsLib.counts(rows.flatMap((r) => r.findings)));
+  /** 見出しの件数。絞り込んでいるときは、表に出ているものの分 */
+  const totals = $derived(vulnsLib.counts((filtering ? shown : rows).flatMap((r) => r.findings)));
   const hideChoices = $derived(vulnsLib.hideChoices(rawFindings));
   const hiddenCount = $derived(rawFindings.length - rows.reduce((n, r) => n + r.findings.length, 0));
 
@@ -79,6 +108,25 @@
     prefs.vulnHide = prefs.vulnHide.includes(k) ? prefs.vulnHide.filter((x) => x !== k) : [...prefs.vulnHide, k];
     savePrefs();
   }
+
+  // ---- 診断書 (LockWatch の report --html) ----
+  /** 書いているもの: "" は全部、ほかはプロジェクトの key */
+  let reporting = $state<string | null>(null);
+
+  async function writeReport(p?: Project) {
+    reporting = p?.key ?? "";
+    try {
+      const path = await api.lockwatchReportHtml($state.snapshot(prefs.vulnHide), p?.local?.id ?? null);
+      toast(`診断書を書き、ブラウザで開きました: ${path}`);
+    } catch (e) {
+      toast(errorText(e));
+    } finally {
+      reporting = null;
+    }
+  }
+
+  /** 診断書を書けるもの: 照合の結果があるもの (廃止・未照合は LockWatch の結果に無い) */
+  const reportable = (r: Row) => r.status === "ok" || r.status === "no-lockfile" || r.status === "error";
 
   let reloading = $state(false);
   async function reload() {
@@ -277,11 +325,45 @@
         <button onclick={reload} disabled={reloading} title="LockWatch の結果を読み直す (照合はしない)">
           {reloading ? "読み直しています…" : "結果を読み直す"}
         </button>
+        {#if !app.vulns.error}
+          <button
+            onclick={() => writeReport()}
+            disabled={reporting !== null}
+            title="LockWatch の診断書 (リポジトリごとの HTML と一覧) を書いて、一覧をブラウザで開く。「隠す」で選んだものは除く。絞り込みに関係なく全部を書く。照合はしない"
+            >📄 {reporting === "" ? "書いています…" : "診断書"}</button
+          >
+        {/if}
       </div>
 
       {#if app.vulns.error}
         <p class="err">{app.vulns.error}</p>
       {:else}
+        <div class="filters">
+          <input
+            class="search"
+            type="search"
+            placeholder="名前・パス・タグ・パッケージ・ID"
+            bind:value={filter.query}
+            aria-label="検索"
+            title="プロジェクトの名前・パス・タグ・リモート、脆弱性のパッケージ名・ID・別名で絞り込む"
+          />
+          <label class="check">
+            <span class="muted">タグ</span>
+            <select bind:value={filter.tag} class:active={!!filter.tag}>
+              <option value="">すべて</option>
+              {#each tagChoices as o (o.tag)}
+                <option value={o.tag}>{"　".repeat(o.tag.split("/").length - 1)}{o.tag.slice(o.tag.lastIndexOf("/") + 1)} ({o.count})</option>
+              {/each}
+              {#if noTagCount || filter.tag === vulnsLib.NO_TAG}
+                <option value={vulnsLib.NO_TAG}>タグなし ({noTagCount})</option>
+              {/if}
+            </select>
+          </label>
+          {#if filtering}
+            <button class="small" onclick={clearFilter} title="文字とタグの絞り込みを外す">✕ 解除</button>
+          {/if}
+          <span class="muted small num">{shown.length} / {base.length} 件</span>
+        </div>
         <div class="filters">
           {#if hideChoices.length}
             <span class="muted">隠す</span>
@@ -302,6 +384,8 @@
 
         {#if !rows.length}
           <p class="muted">LockWatch の対象になっているリポジトリがありません。上の「更新」で一覧を渡します。</p>
+        {:else if !shown.length && filtering}
+          <p class="muted">絞り込みに当たるリポジトリはありません。</p>
         {:else if !shown.length}
           <p><span class="badge good">脆弱性の見つかったリポジトリはありません</span> <span class="muted">({rows.length} 件を見ています)</span></p>
         {:else}
@@ -360,6 +444,17 @@
                     {relative(r.scannedAt, now)}
                   </td>
                   <td class="c-act">
+                    {#if reportable(r)}
+                      <button
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          writeReport(r.project);
+                        }}
+                        disabled={reporting !== null}
+                        title="このリポジトリの診断書 (HTML) を書いてブラウザで開く。「隠す」で選んだものは除く。作業する人や Claude にそのまま渡せる"
+                        >📄 {reporting === r.project.key ? "書いています…" : "診断書"}</button
+                      >
+                    {/if}
                     <button
                       onclick={(e) => {
                         e.stopPropagation();
@@ -781,9 +876,26 @@
     text-align: right;
   }
 
+  .c-act {
+    white-space: nowrap;
+  }
+
   .c-act button {
     font-size: 12px;
     padding: 2px 8px;
+  }
+
+  .c-act button + button {
+    margin-left: 4px;
+  }
+
+  .filters .search {
+    width: 260px;
+    max-width: 100%;
+  }
+
+  .filters select.active {
+    border-color: var(--accent);
   }
 
   .host {

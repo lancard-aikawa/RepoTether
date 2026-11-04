@@ -307,6 +307,13 @@ export async function lockwatchShare(): Promise<string> {
   return call("lockwatch_share");
 }
 
+/** 診断書 (LockWatch の report --html) を書いて、ブラウザで開く。開いたファイルの場所を返す。
+ * repoId (LocalRepo.id) があればそのリポジトリの診断書だけ、無ければ全部と一覧。hide は「隠す」で選んだもの */
+export async function lockwatchReportHtml(hide: string[], repoId?: string | null): Promise<string> {
+  if (!inTauri) throw new Error("ブラウザ表示では作れません");
+  return call("lockwatch_report_html", { hide, repoId: repoId ?? null });
+}
+
 /** 前回の「影響を調べる」の HTML (Claude は動かさない)。repoId は LocalRepo.id */
 export async function lockwatchAssessLast(repoId: string): Promise<Assessed> {
   if (!inTauri) return { path: "", exists: false, madeAt: null, changed: null };

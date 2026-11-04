@@ -100,3 +100,39 @@ test("LockWatch の版で使える機能を決める", () => {
   assert.equal(v.lockwatchAtLeast("0.2.0", 0, 2), true);
   assert.equal(v.lockwatchAtLeast("0.1.9", 0, 2), false);
 });
+
+// ---- 脆弱性タブの絞り込み (文字とタグ) ----
+
+const finding = (pkg: string, id: string, aliases: string[] = []): any => ({ package: pkg, id, aliases });
+
+test("queryMatches は名前・パスなどと、パッケージ名・ID・別名に当たる", () => {
+  const fs = [finding("lodash", "GHSA-aaaa", ["CVE-2021-1"])];
+  assert.ok(v.queryMatches(["RepoTether", "C:\\Repos\\mywork\\RepoTether"], fs, ""));
+  assert.ok(v.queryMatches(["RepoTether"], fs, "repot"));
+  assert.ok(v.queryMatches(["x", "C:\\Repos\\mywork\\RepoTether"], fs, "repos/mywork"));
+  assert.ok(v.queryMatches(["x"], fs, "LODASH"));
+  assert.ok(v.queryMatches(["x"], fs, "ghsa-aaaa"));
+  assert.ok(v.queryMatches(["x"], fs, "cve-2021"));
+  assert.ok(!v.queryMatches(["x", null, undefined], fs, "react"));
+});
+
+test("tagMatches は下の階層も含める", () => {
+  assert.ok(v.tagMatches(["仕事/客先"], "仕事"));
+  assert.ok(v.tagMatches(["仕事"], "仕事"));
+  assert.ok(!v.tagMatches(["仕事場"], "仕事"));
+  assert.ok(!v.tagMatches(["仕事"], "仕事/客先"));
+  assert.ok(v.tagMatches([], ""));
+  assert.ok(v.tagMatches([], v.NO_TAG));
+  assert.ok(!v.tagMatches(["a"], v.NO_TAG));
+});
+
+test("tagOptions は上の階層を足し、設定の順に並べて数える", () => {
+  const lists = [["仕事/客先"], ["仕事"], ["自作"], []];
+  assert.deepEqual(v.tagOptions(lists, ["自作", "仕事", "仕事/客先"]), [
+    { tag: "自作", count: 1 },
+    { tag: "仕事", count: 2 },
+    { tag: "仕事/客先", count: 1 },
+  ]);
+  // 選んでいるタグは 0 件でも残す
+  assert.deepEqual(v.tagOptions([[]], [], "消えた"), [{ tag: "消えた", count: 0 }]);
+});
