@@ -380,7 +380,7 @@ RepoTether が PHP・JavaScript・TypeScript と判定したプロジェクト�
 - LockWatch が 0.5.0 より古いと、ボタンは押せず、更新の仕方が出ます
 
 **自動の判断** — 一度「Claude に影響を調べさせる」をしたリポジトリについて、その後に増えた脆弱性だけを、LockWatch の定期実行が毎日 Claude Code に調べさせます
-(`lockwatch assess --new`。LockWatch の設定 `auto_assess` を入れたときだけ動き、既定は切)。
+(`lockwatch assess --new`。LockWatch 0.7.0 以上。LockWatch の設定 `auto_assess` を入れたときだけ動き、既定は切)。
 
 - 対象は **github.com の公開のリポジトリだけ**です。非公開のもの・github.com 以外のものは自動では調べません
 - 前回の判断で「ビルドのときだけ」「開発の手元だけ」「使っていない」だったパッケージは、Claude に聞かずにその判断を使います (悪用が確認されたもの (KEV)・悪意あるコードは必ず聞く)
