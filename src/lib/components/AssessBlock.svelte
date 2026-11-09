@@ -2,9 +2,10 @@
   // 「影響を調べる」: 脆弱性がビルド・リリースにどう効くかを、LockWatch (assess) から Claude Code に調べさせて HTML で開く。
   // 詳細パネルの「脆弱性」タブと、脆弱性タブで広げた行の両方に置く。動いているかどうかは store に置き、画面を移っても続く
   import { relative, toMs } from "$lib/format";
-  import { app, loadAssessed, runAssess } from "$lib/store.svelte";
+  import * as api from "$lib/api";
+  import { app, errorText, loadAssessed, runAssess } from "$lib/store.svelte";
   import type { RepoVulns } from "$lib/types";
-  import { ASSESS_SINCE, hasAssess } from "$lib/vulns";
+  import { ASSESS_SINCE, assessStale, hasAssess } from "$lib/vulns";
 
   let { repoId, visibility, now }: { repoId: string; visibility: RepoVulns["visibility"]; now: number } = $props();
 
@@ -14,6 +15,18 @@
   /** LockWatch の版が分かっていて、assess の無い古いもの。分からなければ押させてみる (古ければ LockWatch がそう答える) */
   const lwVersion = $derived(app.lockwatchStatus?.lockwatch ?? null);
   const tooOld = $derived(lwVersion != null && !hasAssess(lwVersion));
+  /** 調べ直しを勧めるか。増えたものがあるときだけ (上げて直って消えただけなら、前回の判断は古くならない) */
+  const stale = $derived(assessStale(last));
+
+  /** 診断の後に増えた脆弱性を自動で調べた分の HTML を開く */
+  async function openNew() {
+    delete app.assessError[repoId];
+    try {
+      await api.lockwatchAssessOpenNew(repoId);
+    } catch (e) {
+      app.assessError[repoId] = errorText(e);
+    }
+  }
 
   $effect(() => {
     if (!tooOld && !(repoId in app.assessed)) void loadAssessed(repoId);
@@ -24,7 +37,7 @@
   <div class="row">
     <strong>ビルド・リリースへの影響</strong>
     <button
-      class:primary={!last?.exists || !!last?.changed}
+      class:primary={!last?.exists || stale}
       onclick={() => runAssess(repoId, true)}
       disabled={running || tooOld}
       title={tooOld
@@ -37,8 +50,21 @@
       <button onclick={() => runAssess(repoId, false)} title="前回調べた HTML をブラウザで開く (調べ直さない)">
         前回の結果を開く <span class="muted">({relative(toMs(last.madeAt), now)})</span>
       </button>
-      {#if last.changed}
-        <span class="stale" title="前回調べたあとに照合し直して、脆弱性か言語の版の中身が変わりました">前回のあとに脆弱性が変わった</span>
+      {#if last.newHtml}
+        <button
+          onclick={openNew}
+          title="前回調べたあとに増えた脆弱性を、定期実行で自動で判断した分 (LockWatch の assess --new) の HTML をブラウザで開く。調べ直さない"
+          >📄 増分</button
+        >
+      {/if}
+      {#if stale}
+        <span
+          class="stale"
+          title={last.added != null
+            ? `前回調べたあと (自動で判断した分も含む) に、まだ判断していない脆弱性が ${last.added} 件増えました`
+            : "前回調べたあとに照合し直して、脆弱性か言語の版の中身が変わりました"}
+          >{last.added != null ? `未判断 ${last.added}` : "前回のあとに脆弱性が変わった"}</span
+        >
       {/if}
     {/if}
   </div>
@@ -49,7 +75,7 @@
   {:else if running}
     <p class="note">数分 (100 パッケージを超えると 10 分ほど) かかります。ほかの操作をしていてかまいません。終わるとブラウザで開きます。</p>
   {:else}
-    {#if last?.changed}
+    {#if stale}
       <p class="note">前回の結果は、そのときの脆弱性についての判断です。今の中身で見るなら「もう一度調べる」を押してください。</p>
     {/if}
     <p class="note">

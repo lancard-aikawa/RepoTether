@@ -9,7 +9,7 @@
   // 「診断書」は LockWatch の report --html (LockWatch の画面の「診断書を出す」と同じ)。「隠す」で選んだものを除いて書く
   import { untrack } from "svelte";
   import type { Project } from "$lib/derive";
-  import type { LockwatchStatus, RepoVulns, VulnFinding, VulnRuntime } from "$lib/types";
+  import type { AutoJudgment, LockwatchStatus, RepoVulns, VulnFinding, VulnRuntime } from "$lib/types";
   import * as api from "$lib/api";
   import { relative, toMs } from "$lib/format";
   import { app, errorText, loadVulns, openProject, prefs, savePrefs, toast, updateConfig } from "$lib/store.svelte";
@@ -17,6 +17,7 @@
   import { definedTags } from "$lib/tags";
   import type { Config } from "$lib/types";
   import AssessBlock from "./AssessBlock.svelte";
+  import JudgeTag from "./JudgeTag.svelte";
   import RepoIcon from "./RepoIcon.svelte";
 
   let { projects, now }: { projects: Project[]; now: number } = $props();
@@ -32,6 +33,10 @@
     fresh: number;
     /** 前回から新しく出たもの [package, id] */
     newPairs: [string, string][];
+    /** 自動の判断 (LockWatch の assess --new) と、今の脆弱性のうち判断したもの・急ぐものの数 */
+    judge: Map<string, AutoJudgment>;
+    judged: number;
+    urgent: number;
     visibility: RepoVulns["visibility"];
     notices: number;
     /** 注意の要る言語 (サポート終了・終了が近い・修正版あり) */
@@ -48,7 +53,10 @@
       if (!v) continue;
       const res = v.result;
       const findings = vulnsLib.visible(vulnsLib.findingsOf(app.vulns, p.local?.id), prefs.vulnHide);
+      const judge = vulnsLib.judgmentMap(v.auto);
       out.push({
+        ...vulnsLib.judgedCounts(judge, findings),
+        judge,
         project: p,
         status: v.retired ? "retired" : (res?.status ?? "none"),
         findings,
@@ -416,6 +424,13 @@
                     <RepoIcon name={r.project.name} path={r.project.path} />
                     <span class="name">{r.project.name}</span>
                     {#if r.fresh}<span class="host new">新しく出た {r.fresh}</span>{/if}
+                    {#if r.urgent}
+                      <span class="judge-sum urgent" title="診断の後に増えた脆弱性のうち、自動の判断で急ぐ (すぐ・近いうちに) となったもの。広げると 1 件ずつ見られます"
+                        >急ぎ {r.urgent}</span
+                      >
+                    {:else if r.judged}
+                      <span class="judge-sum" title="診断の後に増えた脆弱性 {r.judged} 件を自動で判断し、急ぐものはありませんでした">急ぎなし</span>
+                    {/if}
                   </td>
                   <td class="c-sev">
                     {#each vulnsLib.counts(r.findings) as [sev, n] (sev)}
@@ -486,12 +501,14 @@
                       {#if r.findings.length}
                         <ul class="items">
                           {#each allFindings.includes(r.project.key) ? r.findings : r.findings.slice(0, FIRST_FINDINGS) as f (f.lockfile + f.package + f.version + f.id)}
+                            {@const j = vulnsLib.judgmentOf(r.judge, f)}
                             <li>
                               <span class="badge {vulnsLib.SEVERITY_BADGE[f.severity]}">{vulnsLib.SEVERITY_LABEL[f.severity]}</span>
                               <span class="mono">{f.package} {f.version}</span>
                               {#if f.malicious}<span class="badge high">{vulnsLib.MALICIOUS_LABEL}</span>{/if}
                               {#if f.informational}<span class="host">{vulnsLib.choiceLabel(f.informational)}</span>{/if}
                               {#if r.newPairs.some(([p, i]) => p === f.package && i === f.id)}<span class="host new">新しく出た</span>{/if}
+                              {#if j}<JudgeTag judgment={j} />{/if}
                               <button class="link mono small" onclick={() => api.openUrl(`https://osv.dev/vulnerability/${encodeURIComponent(f.id)}`)} title="osv.dev で詳しく見る"
                                 >{f.id}</button
                               >
@@ -710,6 +727,35 @@
               {/if}
             </td>
           </tr>
+          {#if s.autoAssess}
+            {@const aa = s.autoAssess}
+            <tr>
+              <th>自動の判断</th>
+              <td>
+                {#if aa.enabled}
+                  <span class="badge good">入</span>
+                  <span class="muted">
+                    診断 (「Claude に影響を調べさせる」) の後に増えた脆弱性だけを、定期実行で Claude Code に調べさせます。github.com の公開のものだけ、1 回 {aa.maxRepos ?? "-"} リポジトリまで。
+                    Claude Code の利用枠 (API キーなら料金) を使います</span
+                  >
+                  {#if aa.task.registered === false}
+                    <div><span class="badge mid">未登録</span> タスク「{aa.task.name}」が無いので動きません。LockWatch のフォルダで次を実行してください</div>
+                    <div class="cmd">
+                      <code>{api.LOCKWATCH_REGISTER}</code>
+                      <button class="small" onclick={() => copyText(api.LOCKWATCH_REGISTER)}>コピー</button>
+                    </div>
+                  {/if}
+                {:else}
+                  <span class="badge low">切</span>
+                  <span class="muted">入れると、診断の後に増えた脆弱性を毎日自動で判断し、上の一覧に「急ぎ」の札を出します。切り替えは LockWatch の設定で行います (画面の設定のタブか、次のコマンド)</span>
+                  <div class="cmd">
+                    <code>{api.LOCKWATCH_AUTO_ASSESS_ON}</code>
+                    <button class="small" onclick={() => copyText(api.LOCKWATCH_AUTO_ASSESS_ON)}>コピー</button>
+                  </div>
+                {/if}
+              </td>
+            </tr>
+          {/if}
         </tbody>
       </table>
     {/if}
@@ -909,6 +955,24 @@
 
   .host.new {
     border-color: var(--st-mid);
+  }
+
+  /* 自動の判断のまとめ。押せない状態の札なので、ボタンとは形で分ける (角の丸い平らな札。JudgeTag と同じ形) */
+  .judge-sum {
+    font-size: 11px;
+    color: var(--st-low);
+    border: 1px solid var(--st-low);
+    border-radius: 999px;
+    padding: 0 8px;
+    margin-left: 4px;
+    white-space: nowrap;
+    cursor: help;
+  }
+
+  .judge-sum.urgent {
+    color: var(--st-high);
+    border-color: var(--st-high);
+    font-weight: 600;
   }
 
   .grow {

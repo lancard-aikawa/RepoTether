@@ -84,10 +84,13 @@ fn lockwatch_report(state: &AppState) -> core::lockwatch::VulnReport {
         Ok(None) => Default::default(),
         Err(e) => fail(e),
         Ok(Some((_, loc, targets))) => match core::lockwatch::read_latest(&loc.latest()) {
-            Ok(latest) => core::lockwatch::VulnReport {
-                locations: Some(loc),
-                ..core::lockwatch::report(&targets, latest.as_ref())
-            },
+            Ok(latest) => {
+                let auto = core::lockwatch::read_auto(&loc.auto_assess());
+                core::lockwatch::VulnReport {
+                    locations: Some(loc),
+                    ..core::lockwatch::report(&targets, latest.as_ref(), auto.as_ref())
+                }
+            }
             Err(e) => core::lockwatch::VulnReport { locations: Some(loc), ..fail(e) },
         },
     }
@@ -338,6 +341,20 @@ async fn lockwatch_assess(app: AppHandle, repo_id: String, again: bool) -> Resul
             }
             PathBuf::from(last.path)
         };
+        launch::folder(&path)?;
+        Ok(util::display_path(&path.to_string_lossy()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// 診断の後に増えた脆弱性を自動で調べた分の HTML (LockWatch の design.md §7.4) を既定のブラウザで開く。調べはしない
+#[tauri::command]
+async fn lockwatch_assess_open_new(app: AppHandle, repo_id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (runner, id) = lockwatch_target(&app.state::<AppState>(), &repo_id)?;
+        let last = core::lockwatch::assess_last(&runner, &id)?;
+        let path = PathBuf::from(last.new_html.ok_or_else(|| "自動で調べた分はまだありません".to_string())?);
         launch::folder(&path)?;
         Ok(util::display_path(&path.to_string_lossy()))
     })
@@ -844,6 +861,7 @@ pub fn run() {
             lockwatch_report_html,
             lockwatch_assess,
             lockwatch_assess_last,
+            lockwatch_assess_open_new,
             toolkeeper_results,
             toolkeeper_status,
             toolkeeper_open_gui

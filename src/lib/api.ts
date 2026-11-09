@@ -22,6 +22,8 @@ export const LOCKWATCH_URL = "https://github.com/lancard-aikawa/LockWatch";
 export const OSV_SCANNER_INSTALL = "winget install --id Google.OSVScanner --version 2.6.0 --exact";
 /** LockWatch の定期実行を登録するコマンド (LockWatch のフォルダで)。pwsh は入っていない環境があるので、Windows に最初からある powershell で書く */
 export const LOCKWATCH_REGISTER = "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\register-task.ps1";
+/** 自動の判断 (LockWatch の assess --new) を入れるコマンド (LockWatch のフォルダで)。RepoTether は LockWatch の設定を書き換えない */
+export const LOCKWATCH_AUTO_ASSESS_ON = "uv run lockwatch config set auto_assess true";
 /** ToolKeeper の定期実行 (週 1 回、調べるだけ) を登録するコマンド (ToolKeeper のフォルダで)。LockWatch と同じ書き方 */
 export const TOOLKEEPER_REGISTER = LOCKWATCH_REGISTER;
 
@@ -325,6 +327,12 @@ export async function lockwatchAssessLast(repoId: string): Promise<Assessed> {
 export async function lockwatchAssess(repoId: string, again: boolean): Promise<string> {
   if (!inTauri) throw new Error("ブラウザ表示では調べられません");
   return call("lockwatch_assess", { repoId, again });
+}
+
+/** 診断の後に増えた脆弱性を自動で調べた分の HTML をブラウザで開く (調べはしない)。開いた HTML の場所を返す */
+export async function lockwatchAssessOpenNew(repoId: string): Promise<string> {
+  if (!inTauri) throw new Error("ブラウザ表示では開けません");
+  return call("lockwatch_assess_open_new", { repoId });
 }
 
 /** ファイル選択ダイアログ。キャンセルなら null */

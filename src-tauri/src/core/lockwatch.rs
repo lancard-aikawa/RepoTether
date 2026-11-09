@@ -128,6 +128,11 @@ impl Locations {
     pub fn latest(&self) -> PathBuf {
         self.data_dir.join("results").join("latest.json")
     }
+
+    /// 診断の後に増えた脆弱性の自動の判断 (LockWatch の design.md §7.4)
+    pub fn auto_assess(&self) -> PathBuf {
+        self.data_dir.join("assess").join("new.json")
+    }
 }
 
 /// `lockwatch config show` の _effective_data_dir / _effective_targets を読む
@@ -247,6 +252,19 @@ pub struct Status {
     pub latest: Option<LatestStatus>,
     /// 生態系 → 手元の脆弱性 DB を取った時刻
     pub db: BTreeMap<String, String>,
+    pub task: TaskStatus,
+    /// 診断の後に増えた脆弱性の自動の判断 (LockWatch の design.md §7.4)。それより古い LockWatch では None
+    pub auto_assess: Option<AutoAssessStatus>,
+}
+
+/// 自動の判断の入・切。切り替えは LockWatch の設定 (auto_assess) だけで、RepoTether は見せるだけ
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct AutoAssessStatus {
+    pub enabled: bool,
+    /// 1 回の定期実行で Claude Code を呼ぶリポジトリの数の上限
+    pub max_repos: Option<u32>,
+    /// タスク「LockWatch assess」
     pub task: TaskStatus,
 }
 
@@ -526,6 +544,48 @@ pub fn read_latest(path: &Path) -> Result<Option<Latest>, String> {
         .map_err(|e| format!("{} の形が違います: {e}", path.display()))
 }
 
+// ---- 自動の判断 (<data>/assess/new.json。LockWatch の design.md §7.4) ----
+
+/// 自動で調べた 1 つ (lock ファイル × パッケージ × 版の、増えた脆弱性)
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all(serialize = "camelCase"), default)]
+pub struct AutoItem {
+    pub lockfile: String,
+    pub package: String,
+    pub version: String,
+    /// 増えた脆弱性の ID
+    pub ids: Vec<String>,
+    /// release / build / dev / unused / unknown。答えが壊れていれば None
+    #[serde(rename = "where")]
+    pub place: Option<String>,
+    /// now / soon / later / none
+    pub urgency: String,
+    /// Claude の書いた理由 (画面ではエスケープして出す)
+    pub reason: String,
+    /// claude (Claude が調べた) / reused (前回の判断を使った)
+    pub source: String,
+    pub made_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct AutoRepo {
+    pub items: Vec<AutoItem>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct AutoDoc {
+    pub repos: BTreeMap<String, AutoRepo>,
+}
+
+/// new.json を読む。無い・読めないときは None (自動の判断は添え物なので、脆弱性の一覧は止めない)。
+/// 人が assess をし直すと LockWatch がそのリポジトリの分を消すので、ここでは時刻を突き合わせない
+pub fn read_auto(path: &Path) -> Option<AutoDoc> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()
+}
+
 /// 画面に渡す、リポジトリ 1 つ分
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -541,6 +601,8 @@ pub struct RepoVulns {
     pub share: Option<String>,
     /// 廃止 (照合しない)
     pub retired: bool,
+    /// 診断の後に増えた脆弱性の自動の判断。無ければ空
+    pub auto: Vec<AutoItem>,
 }
 
 /// 画面に渡す全体
@@ -560,7 +622,7 @@ pub struct VulnReport {
 }
 
 /// targets と latest.json を突き合わせて、画面に渡す形にする
-pub fn report(targets: &[(String, Target)], latest: Option<&Latest>) -> VulnReport {
+pub fn report(targets: &[(String, Target)], latest: Option<&Latest>, auto: Option<&AutoDoc>) -> VulnReport {
     let mut by_repo = BTreeMap::new();
     for (local_id, t) in targets {
         let mut result = latest.and_then(|l| l.repos.get(&t.id)).cloned();
@@ -584,6 +646,7 @@ pub fn report(targets: &[(String, Target)], latest: Option<&Latest>) -> VulnRepo
                 new: if t.retired { vec![] } else { new },
                 share: t.share.clone(),
                 retired: t.retired,
+                auto: if t.retired { vec![] } else { auto.and_then(|a| a.repos.get(&t.id)).map(|r| r.items.clone()).unwrap_or_default() },
             },
         );
     }
@@ -708,6 +771,12 @@ pub struct Assessed {
     pub made_at: Option<String>,
     /// そのとき渡した脆弱性と今の結果の中身が違うか (照合の時刻だけの違いは false)。比べられなければ None
     pub changed: Option<bool>,
+    /// 調べたあとに増えた・消えた脆弱性の数 (自動で調べた分は調べたものに含む)。古い LockWatch・比べられなければ None。
+    /// 調べ直しを勧めるのは added が 1 以上のときだけ (消えただけなら判断は古くならない)
+    pub added: Option<u32>,
+    pub removed: Option<u32>,
+    /// 自動で調べた分の HTML。無ければ None
+    pub new_html: Option<String>,
 }
 
 /// assess の無い古い LockWatch では argparse が「invalid choice」で断る
@@ -955,8 +1024,9 @@ mod tests {
             &[remote("github.com/me/pub", false)],
             Rules::default(),
         );
-        let rep = report(&targets, Some(&latest));
+        let rep = report(&targets, Some(&latest), None);
         let pubr = &rep.by_repo[&util::path_key(r"C:\Repos\pub")];
+        assert!(pubr.auto.is_empty(), "new.json が無ければ自動の判断は空");
         let res = pubr.result.as_ref().unwrap();
         assert_eq!(res.findings[0].fixed, ["6.0.9"]);
         assert!(!res.findings[0].malicious, "malicious の無い古い結果は false");
@@ -972,6 +1042,48 @@ mod tests {
         // 画面へは camelCase
         let json = serde_json::to_value(&rep).unwrap();
         assert!(json["byRepo"].as_object().unwrap().values().any(|v| v["result"]["scannedAt"].is_string()));
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn reads_auto_assess_and_attaches_by_target_id() {
+        let d = tmp("auto");
+        let path = d.join("new.json");
+        assert_eq!(read_auto(&path), None, "無ければ None");
+        std::fs::write(&path, "{ broken").unwrap();
+        assert_eq!(read_auto(&path), None, "壊れていても一覧は止めない");
+        std::fs::write(
+            &path,
+            r#"{"format": 1, "repos": {"github.com/me/pub": {"based_on": "2026-10-23T09:32:42+09:00", "cost_usd": 0.28,
+                "items": [{"lockfile": "pnpm-lock.yaml", "ecosystem": "npm", "package": "deepmerge", "version": "4.3.1",
+                  "ids": ["GHSA-gcqx"], "severities": {"low": 1}, "where": "build", "urgency": "later", "reason": "ビルドだけ",
+                  "evidence": ["package.json:28"], "action": "上げる", "source": "claude", "made_at": "2026-11-09T09:50:35+09:00"}]}}}"#,
+        )
+        .unwrap();
+        let auto = read_auto(&path).unwrap();
+        let targets = build_targets(
+            &[local(r"C:\Repos\pub", &[("origin", Some("github.com/me/pub"))]), local(r"C:\Repos\x", &[])],
+            &[remote("github.com/me/pub", false)],
+            Rules::default(),
+        );
+        let rep = report(&targets, None, Some(&auto));
+        let items = &rep.by_repo[&util::path_key(r"C:\Repos\pub")].auto;
+        assert_eq!(items.len(), 1);
+        assert_eq!((items[0].place.as_deref(), items[0].urgency.as_str(), items[0].source.as_str()), (Some("build"), "later", "claude"));
+        assert!(rep.by_repo[&util::path_key(r"C:\Repos\x")].auto.is_empty());
+        let json = serde_json::to_value(&items[0]).unwrap();
+        assert_eq!(json["where"], "build", "画面へは where のまま");
+        assert!(json["madeAt"].is_string());
+        // 古い LockWatch の答えには無い項目
+        let old: Assessed = serde_json::from_str(r#"{"path": "C:/a.html", "exists": true, "made_at": null, "changed": true}"#).unwrap();
+        assert_eq!((old.added, old.removed, old.new_html), (None, None, None));
+        let st: Status = serde_json::from_str(r#"{"lockwatch": "0.6.0", "task": {"name": "LockWatch scan", "registered": true}}"#).unwrap();
+        assert_eq!(st.auto_assess, None);
+        let st: Status = serde_json::from_str(
+            r#"{"lockwatch": "0.7.0", "auto_assess": {"enabled": true, "max_repos": 3, "task": {"name": "LockWatch assess", "registered": false}}}"#,
+        )
+        .unwrap();
+        assert_eq!(st.auto_assess.as_ref().map(|a| (a.enabled, a.task.registered)), Some((true, Some(false))));
         let _ = std::fs::remove_dir_all(d);
     }
 

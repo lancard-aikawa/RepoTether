@@ -2,7 +2,7 @@
 //
 // 「隠す」は、深刻度 (low など) か知らせの種類 (unmaintained など) を選ぶ。LockWatch の report --hide と同じ考え方
 
-import type { VulnRuntime, VulnFinding, VulnNotice, VulnReport, VulnSeverity } from "./types";
+import type { Assessed, AutoJudgment, VulnRuntime, VulnFinding, VulnNotice, VulnReport, VulnSeverity } from "./types";
 
 export const SEVERITIES: VulnSeverity[] = ["critical", "high", "medium", "low", "unknown"];
 /** RustSec の知らせの種類 (脆弱性ではないもの) */
@@ -175,6 +175,57 @@ export function lockwatchAtLeast(version: string, major: number, minor: number):
 /** 「影響を調べる」(lockwatch assess) は LockWatch 0.5.0 から */
 export const ASSESS_SINCE = "0.5.0";
 export const hasAssess = (version: string) => lockwatchAtLeast(version, 0, 5);
+
+// ---- 診断の後に増えた脆弱性の自動の判断 (LockWatch の design.md §7.4) ----
+
+/** 急ぎの札の字 (単語 1 つ)。LockWatch の urgency */
+export const URGENCY_WORD: Record<AutoJudgment["urgency"], string> = { now: "急ぎ", soon: "近日", later: "後回し", none: "不要" };
+/** どこで使うかの字 (単語 1 つ)。LockWatch の where */
+export const WHERE_WORD: Record<string, string> = { release: "リリース", build: "ビルド", dev: "開発", unused: "未使用", unknown: "不明" };
+/** 札の色 (app.css の .badge と同じ名前) */
+export const URGENCY_TONE: Record<AutoJudgment["urgency"], string> = { now: "high", soon: "mid", later: "low", none: "low" };
+
+const judgeKey = (lockfile: string, pkg: string, version: string, id: string) => `${lockfile}\u0000${pkg}\u0000${version}\u0000${id}`;
+
+/** (lock ファイル, パッケージ, 版, ID) → 判断。同じものが 2 つあれば後の (新しい) 方 */
+export function judgmentMap(auto: AutoJudgment[] | undefined): Map<string, AutoJudgment> {
+  const m = new Map<string, AutoJudgment>();
+  for (const j of auto ?? []) for (const id of j.ids) m.set(judgeKey(j.lockfile, j.package, j.version, id), j);
+  return m;
+}
+
+export function judgmentOf(m: Map<string, AutoJudgment>, f: Pick<VulnFinding, "lockfile" | "package" | "version" | "id">): AutoJudgment | undefined {
+  return m.get(judgeKey(f.lockfile, f.package, f.version, f.id));
+}
+
+/** 今の脆弱性のうち、自動で判断したものの数と、そのうち急ぐもの (now・soon) の数。もう消えた脆弱性の判断は数えない */
+export function judgedCounts(m: Map<string, AutoJudgment>, findings: VulnFinding[]): { judged: number; urgent: number } {
+  let judged = 0;
+  let urgent = 0;
+  for (const f of findings) {
+    const j = judgmentOf(m, f);
+    if (!j) continue;
+    judged++;
+    if (j.urgency === "now" || j.urgency === "soon") urgent++;
+  }
+  return { judged, urgent };
+}
+
+/** 札の tooltip。理由と、だれが判断したか */
+export function judgmentTitle(j: AutoJudgment): string {
+  const who = j.source === "reused" ? "前回の判断を使った (Claude は見ていない)" : "Claude が調べた";
+  const when = j.madeAt ? ` ${j.madeAt.slice(0, 10)}` : "";
+  const where = j.where ? `どこで使うか: ${WHERE_WORD[j.where] ?? j.where}\n` : "";
+  return `${where}${j.reason}\n(${who}${when})`;
+}
+
+/** assess --last の答えで、調べ直しを勧めるか。増えたものがあるときだけ (消えただけなら判断は古くならない)。
+ * added の無い古い LockWatch は changed で決める */
+export function assessStale(last: Assessed | undefined): boolean {
+  if (!last?.exists) return false;
+  if (last.added != null) return last.added > 0;
+  return !!last.changed;
+}
 
 // ---- 言語そのものの版 (LockWatch の design.md §3.6) ----
 

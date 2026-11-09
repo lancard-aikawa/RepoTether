@@ -136,3 +136,42 @@ test("tagOptions は上の階層を足し、設定の順に並べて数える", 
   // 選んでいるタグは 0 件でも残す
   assert.deepEqual(v.tagOptions([[]], [], "消えた"), [{ tag: "消えた", count: 0 }]);
 });
+
+// ---- 自動の判断 (LockWatch の assess --new。design.md §7.4) ----
+
+const judge = (pkg: string, ids: string[], urgency: string, source = "claude", where: string | null = "build"): any => ({
+  lockfile: "Cargo.lock",
+  package: pkg,
+  version: "1.0.0",
+  ids,
+  where,
+  urgency,
+  reason: "理由",
+  source,
+  madeAt: "2026-11-09T09:50:35+09:00",
+});
+
+test("判断は (lock ファイル, パッケージ, 版, ID) で突き合わせ、今ある脆弱性だけを数える", () => {
+  const m = v.judgmentMap([judge("vite", ["GHSA-b"], "now", "claude", "release"), judge("cookie", ["GHSA-c"], "later"), judge("gone", ["GHSA-z"], "now")]);
+  assert.equal(v.judgmentOf(m, f("vite", "GHSA-b", "high"))?.urgency, "now");
+  assert.equal(v.judgmentOf(m, { ...f("vite", "GHSA-b", "high"), version: "2.0.0" }), undefined, "版が違えば別のもの");
+  assert.equal(v.judgmentOf(m, f("axios", "GHSA-a", "critical")), undefined);
+  // gone はもう消えた脆弱性の判断なので数えない
+  assert.deepEqual(v.judgedCounts(m, sample), { judged: 2, urgent: 1 });
+  assert.deepEqual(v.judgedCounts(v.judgmentMap(undefined), sample), { judged: 0, urgent: 0 });
+});
+
+test("札の tooltip には理由と、だれが判断したか", () => {
+  assert.match(v.judgmentTitle(judge("vite", ["x"], "later", "reused")), /前回の判断を使った/);
+  assert.match(v.judgmentTitle(judge("vite", ["x"], "later")), /ビルド[\s\S]*理由[\s\S]*Claude が調べた 2026-11-09/);
+  assert.doesNotMatch(v.judgmentTitle(judge("vite", ["x"], "later", "claude", null)), /どこで使うか/);
+});
+
+test("調べ直しを勧めるのは、増えたものがあるときだけ", () => {
+  const base = { path: "a.html", exists: true, madeAt: null, changed: true };
+  assert.equal(v.assessStale({ ...base, added: 0, removed: 7 }), false, "直って消えただけなら勧めない");
+  assert.equal(v.assessStale({ ...base, added: 2, removed: 0 }), true);
+  assert.equal(v.assessStale(base), true, "added の無い古い LockWatch は changed で決める");
+  assert.equal(v.assessStale({ ...base, exists: false, added: 3 }), false);
+  assert.equal(v.assessStale(undefined), false);
+});

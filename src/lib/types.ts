@@ -260,6 +260,25 @@ export interface RepoVulns {
   share: string | null;
   /** 廃止 (照合しない)。廃止のものは result が null */
   retired: boolean;
+  /** 診断の後に増えた脆弱性の自動の判断 (LockWatch の assess/new.json。design.md §7.4)。無ければ空 */
+  auto: AutoJudgment[];
+}
+
+/** 自動の判断 1 つ (lock ファイル × パッケージ × 版の、増えた脆弱性) */
+export interface AutoJudgment {
+  lockfile: string;
+  package: string;
+  version: string;
+  /** 増えた脆弱性の ID */
+  ids: string[];
+  /** どこで使うか。答えが壊れていれば null */
+  where: "release" | "build" | "dev" | "unused" | "unknown" | null;
+  urgency: "now" | "soon" | "later" | "none";
+  /** Claude の書いた理由 (文字として出す) */
+  reason: string;
+  /** claude = Claude が調べた / reused = 前回の判断を使った */
+  source: "claude" | "reused";
+  madeAt: string | null;
 }
 
 /** LockWatch が使える状態か (lockwatch status --json) */
@@ -277,6 +296,8 @@ export interface LockwatchStatus {
   db: Record<string, string>;
   /** registered は Windows 以外・調べられないときは null */
   task: { name: string; registered: boolean | null };
+  /** 自動の判断の入・切 (LockWatch の設定 auto_assess)。それより古い LockWatch では null */
+  autoAssess: { enabled: boolean; maxRepos: number | null; task: { name: string; registered: boolean | null } } | null;
 }
 
 /** ToolKeeper が使える状態か (toolkeeper status --json。ToolKeeper の design.md §9.2) */
@@ -339,6 +360,11 @@ export interface Assessed {
   madeAt: string | null;
   /** そのとき渡した脆弱性と今の結果の中身が違うか (照合の時刻だけの違いは false)。比べられなければ null */
   changed: boolean | null;
+  /** 調べたあとに増えた・消えた脆弱性の数 (自動で調べた分は調べたものに含む)。古い LockWatch では無い */
+  added?: number | null;
+  removed?: number | null;
+  /** 自動で調べた分の HTML。無ければ null */
+  newHtml?: string | null;
 }
 
 /** 「今すぐ調べる」の事前チェック (LockWatch の scan --check) の答え */

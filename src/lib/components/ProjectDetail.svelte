@@ -27,6 +27,7 @@
   import { hostOf, normalizeUrl, titleCandidate } from "$lib/links";
   import * as vulnsLib from "$lib/vulns";
   import AssessBlock from "./AssessBlock.svelte";
+  import JudgeTag from "./JudgeTag.svelte";
   import ProjectActions from "./ProjectActions.svelte";
   import ReadmeView from "./ReadmeView.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
@@ -250,6 +251,8 @@
   const vulnHiddenCount = $derived(vulnAll.length - vulnFindings.length);
   const vulnChoices = $derived(vulnsLib.hideChoices(vulnAll));
   const isNewVuln = (pkg: string, id: string) => !!vulns?.new.some(([p, i]) => p === pkg && i === id);
+  /** 診断の後に増えた脆弱性の自動の判断 (LockWatch の assess --new) */
+  const vulnJudge = $derived(vulnsLib.judgmentMap(vulns?.auto));
   /** checking = 事前チェック中、scanning = 照合中 */
   let scanning = $state<"" | "checking" | "scanning">("");
   let scanError = $state("");
@@ -1059,12 +1062,14 @@
             {/if}
             <ul class="findings">
               {#each vulnFindings as f (f.lockfile + f.package + f.version + f.id)}
+                {@const judged = vulnsLib.judgmentOf(vulnJudge, f)}
                 <li>
                   <span class="badge {vulnsLib.SEVERITY_BADGE[f.severity]}">{vulnsLib.SEVERITY_LABEL[f.severity]}</span>
                   <span class="mono">{f.package} {f.version}</span>
                   {#if f.malicious}<span class="badge high">{vulnsLib.MALICIOUS_LABEL}</span>{/if}
                   {#if f.informational}<span class="host">{vulnsLib.choiceLabel(f.informational)}</span>{/if}
                   {#if isNewVuln(f.package, f.id)}<span class="host new">新しく出た</span>{/if}
+                  {#if judged}<JudgeTag judgment={judged} />{/if}
                   <div class="small">
                     <button class="link mono" onclick={() => api.openUrl(`https://osv.dev/vulnerability/${encodeURIComponent(f.id)}`)} title="osv.dev で詳しく見る">{f.id}</button>
                     {#if f.fixed.length}<span class="muted">直る版</span> <span class="mono">{f.fixed.join(", ")}</span>{:else}<span class="muted">直る版なし</span>{/if}
