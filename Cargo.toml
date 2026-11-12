@@ -1,0 +1,23 @@
+# RepoTether と Offstage (docs/offstage/concept.md) のワークスペース。
+# ビルドの出力先は .cargo/config.toml で src-tauri/target のままにしている (release.yml の exe のパスと CI のキャッシュがそこを見る)
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crates/offstage-core", "apps/offstage/src-tauri"]
+
+# プロファイルはワークスペースの根にしか書けない (member に書くと無視される)
+# target が 40 GB を超えたので、開発用ビルドのデバッグ情報を減らす。
+# 自分のコードは落ちたときの行番号だけ残し、依存クレートには付けない (デバッガで依存の中は追えなくなる)
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# 個人用ツールなので、サイズより再ビルドの速さを取る。
+# lto = true / codegen-units = 1 にすると exe は小さくなるが、1 行直すたびの再ビルドが約 6 秒 → 約 2 分になる。
+# 人に配るときだけ戻す
+[profile.release]
+opt-level = 3
+panic = "abort"
+strip = true
+incremental = true

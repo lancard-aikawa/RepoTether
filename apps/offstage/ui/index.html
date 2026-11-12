@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Offstage</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <h1>Offstage</h1>
+    </div>
+    <div id="status" class="status" aria-live="polite"></div>
+    <button id="refresh" class="btn primary" type="button" title="リポジトリを洗い出し、Claude の会話と結び付け直す">
+      <span class="ico" data-ico="refresh"></span><span class="label">更新</span>
+    </button>
+  </header>
+
+  <section id="alerts" class="alerts" aria-label="印"></section>
+
+  <section class="filters" aria-label="絞り込み">
+    <label class="field grow"><span>検索</span>
+      <input id="q-text" type="search" placeholder="パスの一部（空白で区切ると全部を含むもの）" autocomplete="off">
+    </label>
+    <label class="field"><span>区分</span>
+      <select id="q-class">
+        <option value="">すべて（生成以外）</option>
+        <option value="personal">個人</option>
+        <option value="secret">機密</option>
+        <option value="tooldata">道具</option>
+        <option value="doc">資料</option>
+        <option value="generated">生成</option>
+      </select>
+    </label>
+    <label class="field"><span>状態</span>
+      <select id="q-state">
+        <option value="">すべて</option>
+        <option value="present">あり</option>
+        <option value="missing">消失</option>
+        <option value="moved">移動</option>
+        <option value="dismissed">了解</option>
+      </select>
+    </label>
+    <label class="field"><span>会話</span>
+      <select id="q-mention">
+        <option value="">すべて</option>
+        <option value="any">出た</option>
+        <option value="content">中身</option>
+        <option value="none">なし</option>
+        <optgroup label="出方">
+          <option value="kind:read">読込</option>
+          <option value="kind:attached">添付</option>
+          <option value="kind:grep">検索</option>
+          <option value="kind:edit">編集</option>
+          <option value="kind:bash">命令</option>
+          <option value="kind:tool">道具</option>
+          <option value="kind:write">作成</option>
+          <option value="kind:result">結果</option>
+          <option value="kind:text">本文</option>
+        </optgroup>
+      </select>
+    </label>
+    <label class="field"><span>リポジトリ</span>
+      <select id="q-repo"><option value="">すべて</option></select>
+    </label>
+    <label class="field narrow"><span>種類</span>
+      <input id="q-ext" type="text" placeholder="md" autocomplete="off" spellcheck="false">
+    </label>
+    <button id="clear" class="btn" type="button" title="絞り込みを全部外す">
+      <span class="ico" data-ico="clear"></span><span class="label">解除</span>
+    </button>
+  </section>
+
+  <main class="body">
+    <section class="list" aria-label="一覧">
+      <div class="listbar">
+        <span id="count" class="count"></span>
+        <span class="seg" role="group" aria-label="表示">
+          <button id="view-table" type="button" aria-pressed="true" title="パスを 1 行ずつ並べる">一覧</button>
+          <button id="view-tree" type="button" aria-pressed="false" title="リポジトリとフォルダの木で見る">ツリー</button>
+        </span>
+        <span id="tree-tools" class="tools" hidden>
+          <button id="tree-expand" class="btn chip" type="button" title="フォルダを全部開く">展開</button>
+          <button id="tree-collapse" class="btn chip" type="button" title="フォルダを全部閉じる">畳む</button>
+        </span>
+      </div>
+      <div id="tree" class="tree" role="tree" aria-label="ツリー" hidden></div>
+      <table id="table">
+        <thead>
+          <tr><th>状態</th><th>区分</th><th>パス</th><th class="num">大きさ</th><th>更新</th><th class="num">会話</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p id="empty" class="empty" hidden></p>
+    </section>
+    <aside id="detail" class="detail" aria-label="詳細">
+      <p class="hint">一覧の行を選ぶと、ここに場所・区分・会話に出た場面が出ます。</p>
+    </aside>
+  </main>
+
+  <dialog id="scene" class="scene-dlg" aria-labelledby="scene-title">
+    <header>
+      <div>
+        <h2 id="scene-title"></h2>
+        <div id="scene-sub" class="sid"></div>
+        <div id="scene-roles" class="roles" role="group" aria-label="表示する種類"></div>
+      </div>
+      <div class="dlg-actions">
+        <button id="scene-raw" class="btn" type="button" aria-pressed="false" title="人と Claude の文を、Markdown を組まずに元の文字のまま見る（もう一度押すと戻る）">
+          <span class="ico" data-ico="raw"></span><span class="label">原文</span>
+        </button>
+        <button id="scene-close" class="btn" type="button" title="閉じる（Esc）">
+          <span class="ico" data-ico="clear"></span><span class="label">閉じる</span>
+        </button>
+      </div>
+    </header>
+    <div id="scene-body" class="scene-body"></div>
+  </dialog>
+
+  <script src="vendor/purify.min.js"></script>
+  <script src="vendor/marked.umd.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

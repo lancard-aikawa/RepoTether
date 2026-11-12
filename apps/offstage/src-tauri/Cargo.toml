@@ -1,0 +1,23 @@
+[package]
+name = "offstage"
+version = "0.1.0"
+description = "Find personal files kept outside git, notice when they vanish, and see where they appeared in Claude sessions"
+authors = ["aikawa"]
+edition = "2021"
+license = "MIT"
+publish = false
+
+# 通信しない (docs/offstage/concept.md)。tests/no_network.rs が依存と CSP を確かめる。
+# opener・shell・http の plugin や、reqwest などを足さない
+[dependencies]
+offstage-core = { path = "../../../crates/offstage-core" }
+tauri = { version = "2.12.1", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1.13.1"
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dev-dependencies]
+sha2 = "0.11.1"

@@ -1,0 +1,3 @@
+[build]
+# Keep the pre-workspace output dir (release.yml and CI cache point here)
+target-dir = "src-tauri/target"

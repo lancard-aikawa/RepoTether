@@ -1,0 +1,3 @@
+# Vendored libraries are checked by SHA-256 (apps/offstage/src-tauri/tests/no_network.rs).
+# Keep their bytes as-is: core.autocrlf (default on Windows and on GitHub's Windows runners) would turn LF into CRLF.
+apps/offstage/ui/vendor/*.js -text

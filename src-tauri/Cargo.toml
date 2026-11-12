@@ -28,23 +28,6 @@ tauri-plugin-dialog = "2.7.3"
 tokio = { version = "1.53.1", features = ["rt", "macros"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "query", "native-tls", "charset", "http2", "system-proxy"] }
 
-# target が 40 GB を超えたので、開発用ビルドのデバッグ情報を減らす。
-# 自分のコードは落ちたときの行番号だけ残し、依存クレートには付けない (デバッガで依存の中は追えなくなる)
-[profile.dev]
-debug = "line-tables-only"
-
-[profile.dev.package."*"]
-debug = false
-
-# 個人用ツールなので、サイズより再ビルドの速さを取る。
-# lto = true / codegen-units = 1 にすると exe は小さくなるが、1 行直すたびの再ビルドが約 6 秒 → 約 2 分になる。
-# 人に配るときだけ戻す
-[profile.release]
-opt-level = 3
-panic = "abort"
-strip = true
-incremental = true
-
 [target."cfg(windows)".dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }
 

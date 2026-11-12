@@ -29,7 +29,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          workspaces: src-tauri
+          workspaces: ". -> src-tauri/target"
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
@@ -38,3 +38,7 @@ jobs:
       - run: pnpm build
       - run: cargo test --lib
         working-directory: src-tauri
+      # Offstage core tests (including the check that no network crate is a dependency)
+      - run: cargo test -p offstage-core
+      # Offstage app (no network crates, strict CSP, core permissions only)
+      - run: cargo test -p offstage

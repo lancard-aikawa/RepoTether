@@ -41,7 +41,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2.9.2
         with:
-          workspaces: src-tauri
+          workspaces: ". -> src-tauri/target"
 
       - name: 版を決める (タグと 3 か所の一致を検査)
         id: version
