@@ -1,0 +1,145 @@
+name: release-offstage
+
+# Offstage (apps/offstage) のリリース。タグ offstage-v<版> を打つと、試験・ビルドして Release を公開する。
+# 版はタグが正で、apps/offstage/src-tauri/Cargo.toml と tauri.conf.json と食い違っていたらビルドせずに落とす。
+#   git tag offstage-v0.1.0 && git push origin offstage-v0.1.0
+# RepoTether の Release を「最新」のまま残すため、--latest=false で作る。
+# workflow_dispatch で手動実行するとビルドと検証だけ行い、成果物は Actions の artifact に置く (Release は作らない)。
+on:
+  push:
+    tags: ['offstage-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-offstage-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: ". -> src-tauri/target"
+
+      - name: 版を決める (タグと 2 か所の一致を検査)
+        id: version
+        # タグ名はスクリプトに埋め込まず、環境変数で渡して形を確かめてから使う (Actions の式の展開によるスクリプトの注入を防ぐ)
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $conf = (Get-Content apps/offstage/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $cargo = (Select-String -Path apps/offstage/src-tauri/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          Write-Host "tauri.conf.json : $conf"
+          Write-Host "Cargo.toml      : $cargo"
+          if ($conf -ne $cargo) { throw "tauri.conf.json ($conf) と Cargo.toml ($cargo) の版がそろっていません" }
+          if ($env:REF_TYPE -eq 'tag') {
+            $tag = $env:TAG
+            if ($tag -notmatch '^offstage-v[0-9A-Za-z.\-]+$') { throw "タグの形が違います: $tag" }
+            $want = $tag -replace '^offstage-v', ''
+            if ($want -ne $conf) { throw "タグ $tag は版 $want を意味しますが、コードは $conf です。2 か所を上げてからタグを打ち直してください" }
+          }
+          "version=$conf" >> $env:GITHUB_OUTPUT
+          "zip=Offstage-$conf-win-x64.zip" >> $env:GITHUB_OUTPUT
+
+      - name: 試験 (通信するクレートが無いこと・CSP を含む)
+        run: |
+          cargo test -p offstage-core -p offstage
+          if ($LASTEXITCODE -ne 0) { throw "試験が失敗しました" }
+
+      - name: ビルド (exe とインストーラー)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pnpm install --frozen-lockfile
+          Push-Location apps/offstage/src-tauri
+          & ../../../node_modules/.bin/tauri.cmd build --bundles nsis
+          if ($LASTEXITCODE -ne 0) { throw "ビルドが失敗しました" }
+          Pop-Location
+
+      - name: 成果物を確かめて zip を作る
+        id: dist
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          $exe = 'src-tauri/target/release/offstage.exe'
+          if (-not (Test-Path $exe)) { throw "$exe がありません" }
+          $pv = (Get-Item $exe).VersionInfo.ProductVersion
+          Write-Host "exe の ProductVersion: $pv"
+          if (-not $pv.StartsWith($version)) { throw "exe の版 ($pv) が想定 ($version) と違います" }
+          $setup = Get-ChildItem 'src-tauri/target/release/bundle/nsis/Offstage_*-setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw "インストーラーがありません" }
+          if ($setup.Name -notmatch [regex]::Escape($version)) { throw "インストーラーの名前 ($($setup.Name)) に版 $version が入っていません" }
+
+          New-Item -ItemType Directory -Force dist/Offstage | Out-Null
+          Copy-Item $exe dist/Offstage/Offstage.exe
+          Copy-Item LICENSE dist/Offstage/
+          Copy-Item apps/offstage/README.md dist/Offstage/
+          Compress-Archive -Path dist/Offstage -DestinationPath 'dist/${{ steps.version.outputs.zip }}'
+          Copy-Item $setup.FullName dist/
+          "setup=$($setup.Name)" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Offstage-${{ steps.version.outputs.version }}
+          path: |
+            dist/${{ steps.version.outputs.zip }}
+            dist/${{ steps.dist.outputs.setup }}
+
+      - name: Release の本文を組み立てる
+        if: github.ref_type == 'tag'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = '${{ steps.version.outputs.version }}'
+          $lines = Get-Content apps/offstage/CHANGELOG.md
+          $at = ($lines | Select-String -Pattern "^##\s+$([regex]::Escape($version))\s*$").LineNumber
+          if (-not $at) { throw "apps/offstage/CHANGELOG.md に $version の節がありません" }
+          $rest = $lines[$at..($lines.Count - 1)]
+          $end = ($rest | Select-String -Pattern '^##\s' | Select-Object -First 1).LineNumber
+          $body = if ($end) { $rest[0..($end - 2)] } else { $rest }
+          $body = ($body -join "`n").Trim()
+          if (-not $body) { throw "CHANGELOG.md の $version の節が空です" }
+          $intro = (Get-Content apps/offstage/packaging/release-intro.md -Raw) -replace '(?s)<!--.*?-->', ''
+          Set-Content -Path dist/release-body.md -Encoding utf8 -Value @(
+            "## Offstage $version の変更点", '', $body, '', $intro.Trim()
+          )
+
+      - name: Release を作って公開する (最新の印は付けない)
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          $tag = $env:TAG
+          if ($tag -notmatch '^offstage-v[0-9A-Za-z.\-]+$') { throw "タグの形が違います: $tag" }
+          $files = @('dist/${{ steps.version.outputs.zip }}', 'dist/${{ steps.dist.outputs.setup }}')
+          $title = 'Offstage ${{ steps.version.outputs.version }}'
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag @files --clobber
+            if ($LASTEXITCODE -ne 0) { throw "ファイルを付けられません" }
+            gh release edit $tag --title $title --notes-file dist/release-body.md --draft=false --latest=false
+            if ($LASTEXITCODE -ne 0) { throw "Release を直せません" }
+          } else {
+            gh release create $tag @files --title $title --notes-file dist/release-body.md --latest=false
+            if ($LASTEXITCODE -ne 0) { throw "Release を作れません" }
+          }

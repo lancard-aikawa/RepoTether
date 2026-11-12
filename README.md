@@ -29,6 +29,12 @@
 リポジトリは読むだけ。書き込むのは、自分で操作したとき (クローン・pull・safe.directory の追加・任意の git fetch) だけ。
 トークンは設定ファイルに書かず、Windows の資格情報マネージャーに置く。
 
+## Offstage (同じリポジトリの別アプリ)
+
+gitignore して手元だけに置いているファイル (`sandbox/` など) を洗い出し、消えた・動いたものに印を出し、
+Claude の会話に出た場面 (中身まで送ったのか名前だけか) までたどる。通信しない。
+→ [apps/offstage/README.md](apps/offstage/README.md)
+
 ## 動作環境
 
 - Windows 10 / 11 (64 bit)。WebView2 (Windows 11 と、更新済みの Windows 10 には入っている)
@@ -58,6 +64,7 @@ pnpm tauri dev                 # 起動 (画面の変更はすぐ反映、Rust �
 pnpm check                     # 型チェック
 pnpm test                      # フロントのテスト (tests/*.test.mts)
 cd src-tauri && cargo test     # Rust のテスト
+cargo test -p offstage-core    # Offstage の core のテスト (docs/offstage/concept.md)
 pnpm tauri build               # 配布物 (exe とインストーラー)
 pnpm manual-shots              # マニュアルの画像をデモ環境で撮る (docs/images/)
 ```
