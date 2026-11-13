@@ -1,6 +1,6 @@
 [package]
 name = "offstage"
-version = "0.1.0"
+version = "0.1.1"
 description = "Find personal files kept outside git, notice when they vanish, and see where they appeared in Claude sessions"
 authors = ["aikawa"]
 edition = "2021"
