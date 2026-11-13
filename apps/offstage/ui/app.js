@@ -580,6 +580,15 @@ $("clear").onclick = () => {
 (async () => {
   await reloadAll();
   const s = (await invoke("overview")).settings;
+  // RepoTether の行から開いたとき: そのリポジトリで絞る (記録に無ければ絞らない)
+  if (s.initialRepo) {
+    const want = s.initialRepo.replace(/[\\/]+$/, "").toLowerCase();
+    const opt = [...$("q-repo").options].find((o) => o.value.replace(/[\\/]+$/, "").toLowerCase() === want);
+    if (opt) {
+      $("q-repo").value = opt.value;
+      await loadRows();
+    }
+  }
   if (s.view === "tree" || s.view === "table") {
     viewMode = s.view;
     renderList();

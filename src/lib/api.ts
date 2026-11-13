@@ -93,6 +93,7 @@ type MockHooks = {
   __mockLockwatchStatus?: LockwatchStatus;
   __mockTools?: ToolsReport;
   __mockToolkeeperStatus?: ToolkeeperStatus;
+  __mockOffstage?: OffstageStatus;
   __mockPull?: PullResult | string;
   __mockPullDelay?: number;
   /** パス → アイコンの URL (data: など) */
@@ -242,6 +243,43 @@ const noVulns: VulnReport = {
   dbDownloadedAt: null,
   byRepo: {},
 };
+
+// ---- Offstage (同じリポジトリの apps/offstage) ----
+
+/** Offstage の印 (リポジトリごと)。summary.json の中身で、ファイル名は無い */
+export interface OffstageMarks {
+  missing: number;
+  moved: number;
+  secretsSent: number;
+  gone: boolean;
+}
+
+/** exe が null なら Offstage は無い (ボタンも印も出さない) */
+export interface OffstageStatus {
+  exe: string | null;
+  generatedAt: number | null;
+  repos: Record<string, OffstageMarks>;
+}
+
+const noOffstage: OffstageStatus = { exe: null, generatedAt: null, repos: {} };
+
+/** Offstage が見つかるかと、前回の取り込みの印 */
+export async function offstageStatus(): Promise<OffstageStatus> {
+  if (!inTauri) return hooks().__mockOffstage ?? noOffstage;
+  return call("offstage_status");
+}
+
+/** 裏で Offstage に取り込ませ (窓は出ない)、終わったら読み直した印を返す */
+export async function offstageRefresh(): Promise<OffstageStatus> {
+  if (!inTauri) return hooks().__mockOffstage ?? noOffstage;
+  return call("offstage_refresh");
+}
+
+/** Offstage の画面を開く。repo を渡せば、そのリポジトリで絞って開く */
+export async function offstageOpen(repo?: string | null): Promise<void> {
+  if (!inTauri) throw new Error("ブラウザ表示では開けません");
+  return call("offstage_open", { repo: repo ?? null });
+}
 
 /** LockWatch の結果 (手元のリポジトリごと)。LockWatch を使わない設定なら configured: false */
 export async function lockwatchResults(): Promise<VulnReport> {

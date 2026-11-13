@@ -20,6 +20,14 @@
     }
   }
 
+  async function openOffstage() {
+    try {
+      await api.offstageOpen(project.path);
+    } catch (e) {
+      toast(errorText(e));
+    }
+  }
+
   async function open(target: api.OpenTarget) {
     if (!project.path) return;
     try {
@@ -36,6 +44,9 @@
     <button onclick={() => open("terminal")} title="ターミナルを開く">端末</button>
     <button onclick={() => open("explorer")} title="エクスプローラーで開く">フォルダ</button>
     <button onclick={() => openClaude(project.path!)} title="このフォルダで claude を起動する (設定の端末で)">Claude</button>
+    {#if app.offstage?.exe}
+      <button onclick={openOffstage} title="Offstage で、このリポジトリの git の外の手元のファイルを見る">Offstage</button>
+    {/if}
     {#each tools as t (t.id)}
       <button onclick={() => openTool(t.id)} title="{t.label} で開く ({t.command})">{t.label}</button>
     {/each}

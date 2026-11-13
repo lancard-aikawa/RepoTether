@@ -19,6 +19,8 @@ export const app = $state({
   focusFolder: null as { path: string; label: string } | null,
   /** LockWatch の結果 (脆弱性)。LockWatch を使わない設定なら configured: false */
   vulns: null as VulnReport | null,
+  /** Offstage の印 (git の外の手元のファイル)。exe が null なら Offstage は無い。まだ読んでいなければ null */
+  offstage: null as api.OffstageStatus | null,
   /** LockWatch が使える状態か (osv-scanner・定期実行など)。脆弱性タブの案内に使う。まだ確かめていなければ null */
   lockwatchStatus: null as LockwatchStatus | null,
   /** ToolKeeper の結果 (PC に入れた道具の版)。ToolKeeper を使わない設定なら configured: false。まだ読んでいなければ null */
@@ -228,6 +230,31 @@ export async function init() {
   }
   // 初回 (キャッシュなし) はリモートも取る。前回の結果が無ければ、範囲を絞ってもすべて読む
   await refresh(app.snapshot == null, autoScope());
+  // Offstage: 前回の印をすぐ出し、裏で取り込ませて (窓は出ない) 終わったら出し直す。画面の更新は待たせない
+  void startOffstage();
+}
+
+// ---- Offstage (git の外の手元のファイル) ----
+
+async function startOffstage() {
+  try {
+    app.offstage = await api.offstageStatus();
+    if (app.offstage.exe) app.offstage = await api.offstageRefresh();
+  } catch (e) {
+    // 印が出ないだけにする (RepoTether の画面は止めない)
+    console.warn("offstage", errorText(e));
+  }
+}
+
+/** そのリポジトリの Offstage の印 (無ければ null)。パスは大文字小文字と区切りの違いを無視して比べる */
+export function offstageMarksOf(path: string | null | undefined): api.OffstageMarks | null {
+  if (!path || !app.offstage) return null;
+  const key = (p: string) => p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  const want = key(path);
+  for (const [repo, m] of Object.entries(app.offstage.repos)) {
+    if (key(repo) === want) return m;
+  }
+  return null;
 }
 
 /** 自動更新と起動時に読み直す範囲: 最近作業したものだけ (設定で「すべて」にもできる) */

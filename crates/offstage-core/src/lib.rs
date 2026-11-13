@@ -10,3 +10,4 @@ pub mod pipeline;
 pub mod query;
 pub mod repos;
 pub mod store;
+pub mod summary;

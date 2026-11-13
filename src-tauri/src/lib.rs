@@ -247,6 +247,41 @@ async fn toolkeeper_open_gui(app: AppHandle, path: Option<String>) -> Result<(),
     .map_err(|e| e.to_string())?
 }
 
+// ---- Offstage (apps/offstage) ----
+
+/// Offstage が見つかるかと、summary.json の印の数。Offstage が無ければ exe: None
+#[tauri::command]
+async fn offstage_status() -> Result<core::offstage::Status, String> {
+    tauri::async_runtime::spawn_blocking(core::offstage::status).await.map_err(|e| e.to_string())
+}
+
+/// 同時に 2 つ走らせない
+static OFFSTAGE_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 裏で Offstage に取り込ませ (窓は出ない)、終わったら読み直した状態を返す。Offstage が無ければ何もしない
+#[tauri::command]
+async fn offstage_refresh() -> Result<core::offstage::Status, String> {
+    use std::sync::atomic::Ordering;
+    tauri::async_runtime::spawn_blocking(|| {
+        let Some(exe) = core::offstage::locate() else { return Ok(core::offstage::status()) };
+        if OFFSTAGE_RUNNING.swap(true, Ordering::SeqCst) {
+            return Ok(core::offstage::status());
+        }
+        let r = core::offstage::run_refresh(&exe);
+        OFFSTAGE_RUNNING.store(false, Ordering::SeqCst);
+        r.map(|_| core::offstage::status())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Offstage の画面を開く。repo を渡せば、そのリポジトリで絞って開く
+#[tauri::command]
+fn offstage_open(repo: Option<String>) -> Result<(), String> {
+    let exe = core::offstage::locate().ok_or("Offstage が見つかりません")?;
+    core::offstage::open(&exe, repo.as_deref())
+}
+
 /// 社員向けの一覧 (LockWatch の report --share) を書いて、index.html を既定のブラウザで開く。
 /// 先に targets.json を今の一覧と設定にそろえる (載せる場所・廃止の印を変えた直後でも効くように)
 #[tauri::command]
@@ -864,7 +899,10 @@ pub fn run() {
             lockwatch_assess_open_new,
             toolkeeper_results,
             toolkeeper_status,
-            toolkeeper_open_gui
+            toolkeeper_open_gui,
+            offstage_status,
+            offstage_refresh,
+            offstage_open
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

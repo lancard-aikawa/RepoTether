@@ -75,6 +75,8 @@ pub fn refresh(store: &mut Store, repos: &[PathBuf], projects_dir: Option<&Path>
         None => LinkStats::default(),
     };
     rep.take(&changes, &stats);
+    // RepoTether に渡す印の数。書けなくても取り込みは失敗にしない
+    let _ = store.write_summary();
     rep.seconds = t0.elapsed().as_secs_f64();
     Ok(rep)
 }

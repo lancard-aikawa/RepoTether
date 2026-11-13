@@ -9,6 +9,7 @@ pub mod icon;
 pub mod lang;
 pub mod lockwatch;
 pub mod model;
+pub mod offstage;
 pub mod pagetitle;
 pub mod remote;
 pub mod secrets;

@@ -42,6 +42,8 @@ pub struct Changes {
 
 pub struct Store {
     pub(crate) conn: Connection,
+    /// 記録のファイルの場所 (隣に summary.json を書く)
+    pub(crate) path: PathBuf,
 }
 
 /// 既定の置き場所 `%USERPROFILE%\.offstage\index.sqlite`
@@ -117,6 +119,8 @@ impl Store {
             std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         }
         let conn = Connection::open(path).map_err(|e| e.to_string())?;
+        // 画面と裏の取り込み (RepoTether から --refresh) が同時に書いても、すぐには失敗させず待つ
+        conn.busy_timeout(std::time::Duration::from_secs(60)).map_err(|e| e.to_string())?;
         conn.execute_batch(
             "PRAGMA journal_mode = WAL;
              CREATE TABLE IF NOT EXISTS files (
@@ -181,7 +185,7 @@ impl Store {
              );",
         )
         .map_err(|e| e.to_string())?;
-        Ok(Store { conn })
+        Ok(Store { conn, path: path.to_path_buf() })
     }
 
     /// 記録にある全部のパス (消えた・移動したものも)。(リポジトリ, パス, 中を並べず 1 件に畳んだフォルダか)

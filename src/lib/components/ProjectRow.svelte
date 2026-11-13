@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Project } from "$lib/derive";
   import { relative } from "$lib/format";
-  import { app, errorText, prefs, setHidden, toast } from "$lib/store.svelte";
+  import { app, errorText, offstageMarksOf, prefs, setHidden, toast } from "$lib/store.svelte";
   import { heavyOf } from "$lib/vulns";
   import ProjectActions from "./ProjectActions.svelte";
   import RemoteBadges from "./RemoteBadges.svelte";
@@ -48,6 +48,9 @@
 
   /** 重い脆弱性 (緊急・高) の数。詳細パネルの「隠す」で隠したものは数えない */
   const heavy = $derived(heavyOf(app.vulns, p.local?.id, prefs.vulnHide));
+  // Offstage の印 (git の外の手元のファイルが消えた・動いた・機密の中身が会話に出た)。0 なら出さない
+  const off = $derived(offstageMarksOf(p.path));
+  const offTip = "Offstage の印 (git の外の手元のファイル)。行の「Offstage」で、このリポジトリに絞って開く";
 
   async function toggleHidden() {
     try {
@@ -109,13 +112,19 @@
     {#if p.kind === "remote" && p.remotes[0]?.description}
       <div class="path muted">{p.remotes[0].description}</div>
     {/if}
-    {#if p.leftovers.length || heavy || (showTags && p.tags.length)}
+    {#if p.leftovers.length || heavy || off || (showTags && p.tags.length)}
       <div class="badges">
         {#each p.leftovers as l (l.kind)}
           <span class="badge {l.severity}" title={l.detail ?? ""}>{l.label}</span>
         {/each}
         {#if heavy}
           <span class="badge high" title="LockWatch の結果。緊急・高の脆弱性の数 (詳細パネルの「脆弱性」タブ)">脆弱性 {heavy}</span>
+        {/if}
+        {#if off}
+          {#if off.missing}<span class="badge high" title={offTip}>消失 {off.missing}</span>{/if}
+          {#if off.secretsSent}<span class="badge high" title={offTip}>送信 {off.secretsSent}</span>{/if}
+          {#if off.moved}<span class="badge mid" title={offTip}>移動 {off.moved}</span>{/if}
+          {#if off.gone}<span class="badge mid" title={offTip}>Offstage: 不明</span>{/if}
         {/if}
         {#if showTags}
           {#each p.tags as t (t)}<span class="tag-chip"># {t}</span>{/each}

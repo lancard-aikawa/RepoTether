@@ -32,6 +32,8 @@ struct Settings {
     open_scene: bool,
     /// 見本の画面を撮るとき: 表示 (OFFSTAGE_VIEW=table / tree)
     view: Option<String>,
+    /// 起動時に絞るリポジトリ (RepoTether の行から `--repo <フォルダ>` で開いたとき)
+    initial_repo: Option<String>,
 }
 
 fn settings() -> Settings {
@@ -51,7 +53,7 @@ fn settings() -> Settings {
             None => (Vec::new(), 3, "(none)".to_string()),
         }
     };
-    Settings { db, roots, depth, projects, roots_from, auto_refresh, select, open_scene, view }
+    Settings { db, roots, depth, projects, roots_from, auto_refresh, select, open_scene, view, initial_repo: None }
 }
 
 struct AppState {
@@ -191,13 +193,21 @@ fn scene(st: St, log_path: String, line_no: i64) -> Result<Vec<offstage_core::li
 
 #[tauri::command]
 fn dismiss(st: St, repo: String, rel_path: String) -> Result<bool, String> {
-    with_store(&st, |s| s.dismiss(&repo, &rel_path))
+    with_store(&st, |s| {
+        let n = s.dismiss(&repo, &rel_path)?;
+        let _ = s.write_summary(); // RepoTether の印を数え直す
+        Ok(n)
+    })
 }
 
 #[tauri::command]
 fn set_class(st: St, repo: String, rel_prefix: String, class: String) -> Result<(), String> {
     let c = Class::from_label(&class).ok_or_else(|| format!("区分が違います: {class}"))?;
-    with_store(&st, |s| s.set_override(&repo, &rel_prefix, c))
+    with_store(&st, |s| {
+        s.set_override(&repo, &rel_prefix, c)?;
+        let _ = s.write_summary();
+        Ok(())
+    })
 }
 
 #[tauri::command]
@@ -258,8 +268,47 @@ mod tests {
     }
 }
 
+/// 起動の引数
+///   --refresh        窓を出さずに取り込みだけして終わる (RepoTether が起動時に裏で走らせる)。終了コードは 0 / 1
+///   --repo <フォルダ> そのリポジトリで絞った状態で開く (RepoTether の行から開くとき)
+struct Args {
+    refresh: bool,
+    repo: Option<String>,
+}
+
+fn args() -> Args {
+    let mut a = Args { refresh: false, repo: None };
+    let mut it = std::env::args().skip(1);
+    while let Some(x) = it.next() {
+        match x.as_str() {
+            "--refresh" => a.refresh = true,
+            "--repo" => a.repo = it.next(),
+            _ => {}
+        }
+    }
+    a
+}
+
+/// 窓を出さずに取り込む。Tauri は起動しない (exe は窓のアプリなので、黒い窓も出ない)
+fn headless_refresh(settings: &Settings) -> i32 {
+    let mut store = match Store::open(&settings.db) {
+        Ok(s) => s,
+        Err(_) => return 1,
+    };
+    let repos = find_repos(&settings.roots, settings.depth);
+    match run_refresh(&mut store, &repos, settings.projects.as_deref()) {
+        Ok(_) => 0,
+        Err(_) => 1,
+    }
+}
+
 fn main() {
-    let settings = settings();
+    let a = args();
+    let mut settings = settings();
+    if a.refresh {
+        std::process::exit(headless_refresh(&settings));
+    }
+    settings.initial_repo = a.repo;
     let store = Store::open(&settings.db).map(Mutex::new);
     let state = Arc::new(AppState { settings, store, titles: Mutex::new(HashMap::new()) });
     tauri::Builder::default()

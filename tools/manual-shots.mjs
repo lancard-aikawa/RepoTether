@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = join(ROOT, "docs", "images");
+// SHOTS_OUT で出力先を変えられる (docs/images を書き換えずに見た目を確かめるとき)
+const OUT = process.env.SHOTS_OUT || join(ROOT, "docs", "images");
 const URL_BASE = "http://localhost:11420/";
 const NOW = Date.now();
 const DAY = 86400000;
@@ -603,6 +604,16 @@ function stopServer(child) {
   }
 }
 
+// Offstage の印 (git の外の手元のファイル)。summary.json と同じ形
+const OFFSTAGE = {
+  exe: "C:\\Tools\\Offstage\\offstage.exe",
+  generatedAt: 1794470000,
+  repos: {
+    "C:\\Repos\\work\\invoice-api": { missing: 1, moved: 0, secretsSent: 1, gone: false },
+    "C:\\Repos\\mywork\\photo-organizer": { missing: 0, moved: 2, secretsSent: 0, gone: false },
+  },
+};
+
 // ---- 撮影 ----
 async function main() {
   mkdirSync(OUT, { recursive: true });
@@ -621,12 +632,13 @@ async function main() {
       page.setDefaultTimeout(8000);
       await page.route("**/dev-snapshot.json", (route) => route.fulfill({ json: snapshot }));
       await page.addInitScript(
-        ({ config, readme, prefs, transcript, icons, linkIcons, vulns, lockwatchStatus, tools, toolkeeperStatus }) => {
+        ({ config, readme, prefs, transcript, icons, linkIcons, vulns, lockwatchStatus, tools, toolkeeperStatus, offstage }) => {
           window.__mockConfig = config;
           window.__mockVulns = vulns;
           window.__mockLockwatchStatus = lockwatchStatus;
           window.__mockTools = tools;
           window.__mockToolkeeperStatus = toolkeeperStatus;
+          window.__mockOffstage = offstage;
           window.__mockLinkIcons = linkIcons;
           // マニュアルには「ブラウザ表示」の印を出さない。開発サーバーが起動直後にページを読み込み直しても
           // 消えないよう、読み込みのたびに入れる
@@ -653,6 +665,7 @@ async function main() {
           lockwatchStatus: LOCKWATCH_STATUS,
           tools: TOOLS,
           toolkeeperStatus: TOOLKEEPER_STATUS,
+          offstage: OFFSTAGE,
           prefs,
           transcript: TRANSCRIPT.map((e, i) => ({ at: transcriptTimes[i], tools: [], ...e })),
         },

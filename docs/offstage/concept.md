@@ -143,7 +143,12 @@ RepoTether/
    - ⛔ 見本を撮るときは、撮るプロセスを ID で指定し、窓に自分を描かせる（`shoot.ps1 -ProcessId`、PrintWindow）。2026-11-12、名前で最初の Offstage の窓を選んだら、ユーザーが開いていた実際の Offstage を撮り、実際のファイル名が会話に入った
    - ⛔ エクスプローラーに `/` の混じったパス（`…\sandbox/x.md`）を `/select,` で渡すと、デスクトップが開く（2026-11-12、「開く」でホームしか開かなかった）。`\` にそろえ、`/select,"…"` を `raw_arg` で渡す（`Command::arg` は空白を含む引数を全体ごと引用符で囲み、`/select` が読まれない）。`main.rs` の `explorer_arg` と試験
    - ⛔ Windows のパスの上限（260 文字）: 見本の会話のフォルダ名を、本物と同じく cwd から作ったら超えた。Offstage は記録の中の `cwd` を見るので、フォルダ名は何でもよい
-6. RepoTether の行に印を出す
+6. ✅ RepoTether の行に印を出す（2026-11-12。取り込みは (b) RepoTether の起動時に裏で、とユーザーが決めた）
+   - Offstage: `--refresh` で窓を出さずに取り込んで終わる（Tauri を起動しない）。`--repo <フォルダ>` でそのリポジトリに絞って開く。取り込むたび・了解・区分の変更のたびに、記録の隣へ `summary.json`（リポジトリのパスと消失・移動・送信・不明の数だけ。ファイル名は書かない）を、一時ファイルから置き換えて書く
+   - RepoTether: 起動して一覧を読み直したあと、`offstage.exe --refresh` を裏で走らせ（`CREATE_NO_WINDOW`。同時に 2 つは走らせない）、終わったら `summary.json` を読み直す。0 でない行にだけ「消失 n」「送信 n」「移動 n」「Offstage: 不明」の札を出し、行と詳細に「Offstage」ボタン（そのリポジトリで絞って開く）。RepoTether は Offstage の記録の DB にも offstage-core にも依存しない
+   - Offstage を探す順: 環境変数 `OFFSTAGE_EXE`、RepoTether の exe と同じフォルダ（同じリポジトリでビルドすると並ぶ）、`%LOCALAPPDATA%\Offstage`・`%ProgramFiles%\Offstage`（インストーラーの入れ先。実機では未確認）。見つからなければボタンも札も出さない（設定は要らない）
+   - 記録の DB は `busy_timeout` 60 秒（画面と裏の取り込みが同時に書いても待つ）
+   - ⛔ RepoTether と同じフォルダの offstage.exe が `--refresh` を知らない古い版だと、引数を無視して窓を開き、RepoTether はそれが閉じられるまで待つ。両方を同じ版で作り直す
 7. 1-2 の全文検索
 
 ## 決めていないこと
