@@ -27,6 +27,7 @@ const ICONS = {
   gone: '<svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/><path d="M9 14h6"/></svg>',
   repo: '<svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/><path d="M9 4v6l2-1.5L13 10V4"/></svg>',
   open: '<svg viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v10H3z"/></svg>',
+  launch: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v6H4V6h6"/></svg>',
   ok: '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>',
   apply: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
   undo: '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>',
@@ -324,9 +325,19 @@ async function showDetail(repo, relPath) {
       ${ov ? `<dt>上書き</dt><dd>${esc(ov[0])} → ${esc(CLASS[ov[1]] || ov[1])}</dd>` : ""}
     </dl>
     <div class="actions">
-      <button type="button" class="btn" id="act-open" title="エクスプローラーで場所を開く（無ければ在る親のフォルダ）">${ico("open")}開く</button>
+      <button type="button" class="btn primary" id="act-launch"${d.openable ? "" : " disabled"} title="${esc(
+        d.openable
+          ? r.isDir
+            ? "このフォルダをエクスプローラーで開く"
+            : "既定のアプリで開く"
+          : d.exists
+            ? "開くと実行される種類なので、ここでは開きません（「フォルダ」から）"
+            : "今は無いので開けません"
+      )}">${ico("launch")}開く</button>
+      <button type="button" class="btn" id="act-open" title="エクスプローラーで、このファイルを選んだ状態で場所を開く（無ければ在る親のフォルダ）">${ico("open")}フォルダ</button>
       ${lost ? `<button type="button" class="btn" id="act-ok" title="消えた・移動したのを承知した。印から外す">${ico("ok")}了解</button>` : ""}
     </div>
+    ${d.exists && !d.openable ? `<p class="note">開くと実行される種類なので、「開く」は使えません。中を見るときは「フォルダ」から。</p>` : ""}
     ${
       canClass
         ? `<h3>区分</h3>
@@ -344,6 +355,7 @@ async function showDetail(repo, relPath) {
     <div id="scene-list"></div>`;
   renderSceneList(d.scenes, r.relPath);
   $("act-open").onclick = () => invoke("reveal", { repo, relPath }).catch(alertError);
+  $("act-launch").onclick = () => invoke("open_file", { repo, relPath }).catch(alertError);
   if ($("act-ok")) $("act-ok").onclick = () => invoke("dismiss", { repo, relPath }).then(reloadAll).catch(alertError);
   if ($("act-set"))
     $("act-set").onclick = () =>

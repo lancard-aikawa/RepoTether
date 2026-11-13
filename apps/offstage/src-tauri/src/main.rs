@@ -122,6 +122,8 @@ struct Detail {
     row: Row,
     abs_path: String,
     exists: bool,
+    /// 「開く」(既定のアプリ) で開けるか。無いもの・開くと実行される種類は false
+    openable: bool,
     /// 区分を決めた規則 (機密の疑いと畳んだフォルダ)
     rule: Option<String>,
     /// 当たっている付け替え (パス, 区分)
@@ -148,6 +150,7 @@ fn detail(st: St, repo: String, rel_path: String) -> Result<Option<Detail>, Stri
         .collect();
     Ok(Some(Detail {
         exists: abs.exists(),
+        openable: open_arg(&repo, &rel_path).is_ok(),
         abs_path: abs.to_string_lossy().into_owned(),
         row,
         rule,
@@ -249,9 +252,66 @@ fn reveal(repo: String, rel_path: String) -> Result<(), String> {
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// 既定のアプリで開くと中身が実行される種類。「開く」では開かない (見るつもりで押して動かさないように。フォルダから開く)
+const RUNNABLE: &[&str] = &[
+    "exe", "com", "scr", "pif", "cpl", "msi", "msp", "msc", "bat", "cmd", "ps1", "psm1", "psd1", "vbs", "vbe", "js", "jse",
+    "wsf", "wsh", "hta", "lnk", "url", "reg", "jar", "py", "pyw", "appref-ms", "application", "scf", "inf", "sct",
+];
+
+fn runnable(rel_path: &str) -> bool {
+    Path::new(rel_path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .is_some_and(|e| RUNNABLE.contains(&e.as_str()))
+}
+
+/// 「開く」で explorer.exe に渡す引数 (引用符で囲んだ全体のパス)。フォルダはそのフォルダを、ファイルは既定のアプリで開く。
+/// 無いもの・実行される種類は Err
+fn open_arg(repo: &str, rel_path: &str) -> Result<String, String> {
+    let full = format!("{}\\{}", repo.trim_end_matches(['\\', '/']), rel_path).replace('/', "\\");
+    let p = Path::new(&full);
+    if !p.exists() {
+        return Err("今は無いので開けません。「フォルダ」で在る親のフォルダを開けます".into());
+    }
+    if p.is_file() && runnable(rel_path) {
+        return Err("開くと実行される種類なので、ここでは開きません。「フォルダ」から開いてください".into());
+    }
+    Ok(format!("\"{full}\""))
+}
+
+/// 既定のアプリで開く (フォルダならそのフォルダ)。explorer.exe に渡すと関連付けで開く (黒い窓は出ない)
+#[tauri::command]
+fn open_file(repo: String, rel_path: String) -> Result<(), String> {
+    let arg = open_arg(&repo, &rel_path)?;
+    let mut cmd = std::process::Command::new("explorer.exe");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.raw_arg(&arg);
+    }
+    #[cfg(not(windows))]
+    cmd.arg(&arg);
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::explorer_arg;
+    use super::{explorer_arg, open_arg, runnable};
+
+    #[test]
+    fn open_refuses_missing_and_runnable_files() {
+        let t = std::env::temp_dir().join(format!("offstage open {}", std::process::id()));
+        std::fs::create_dir_all(t.join("sandbox/sub dir")).unwrap();
+        std::fs::write(t.join("sandbox/sub dir/a b.md"), "x").unwrap();
+        std::fs::write(t.join("sandbox/run.BAT"), "x").unwrap();
+        let repo = t.to_string_lossy().into_owned();
+        assert_eq!(open_arg(&repo, "sandbox/sub dir/a b.md").unwrap(), format!("\"{repo}\\sandbox\\sub dir\\a b.md\""));
+        assert_eq!(open_arg(&repo, "sandbox/sub dir").unwrap(), format!("\"{repo}\\sandbox\\sub dir\""), "フォルダはそのまま開く");
+        assert!(open_arg(&repo, "sandbox/run.BAT").unwrap_err().contains("実行される"), "大文字の拡張子も");
+        assert!(open_arg(&repo, "sandbox/gone.md").unwrap_err().contains("今は無い"));
+        assert!(runnable("x/a.ps1") && runnable("a.exe") && !runnable("a.md") && !runnable("Makefile"));
+        let _ = std::fs::remove_dir_all(&t);
+    }
 
     #[test]
     fn explorer_arg_uses_backslashes_and_quotes() {
@@ -314,7 +374,7 @@ fn main() {
     tauri::Builder::default()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            overview, refresh, search, detail, scene, dismiss, set_class, clear_class, reveal
+            overview, refresh, search, detail, scene, dismiss, set_class, clear_class, reveal, open_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running Offstage");
