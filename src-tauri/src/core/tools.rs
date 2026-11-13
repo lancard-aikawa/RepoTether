@@ -477,6 +477,26 @@ mod tests {
         assert_eq!(sha256_of_digest(None), None);
     }
 
+    /// 手で動かす (GitHub につなぐ): 画面の「入れる」と同じ install_latest で最新版を入れ、status まで動かす。
+    /// LOCALAPPDATA を作業用のフォルダに向けて動かす (本当の入れ先を汚さない)
+    #[test]
+    #[ignore]
+    fn real_install_latest_from_github() {
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        for spec in [&LOCKWATCH, &TOOLKEEPER] {
+            let info = rt.block_on(install_latest(&client().unwrap(), spec)).unwrap();
+            eprintln!("{} {:?} -> {}", spec.name, info.installed, info.dir);
+            assert!(info.dir.starts_with(&std::env::var("LOCALAPPDATA").unwrap()));
+            if spec.id == "lockwatch" {
+                let s = super::super::lockwatch::status(&super::super::lockwatch::resolve(&info.dir).unwrap()).unwrap();
+                eprintln!("  status: lockwatch {} data={}", s.lockwatch, s.data_dir);
+            } else {
+                let s = super::super::toolkeeper::status(&super::super::toolkeeper::resolve(&info.dir).unwrap()).unwrap();
+                eprintln!("  status: data={}", s.data_dir);
+            }
+        }
+    }
+
     /// 手で動かす: 道具の scripts/build-exe.cmd で作った本物の zip を入れ、RepoTether の呼び方で status まで動かす。
     /// TOOLS_ZIP_LOCKWATCH / TOOLS_ZIP_TOOLKEEPER に zip、TOOLS_DIR に入れ先の親 (作業用) を入れる
     #[test]
