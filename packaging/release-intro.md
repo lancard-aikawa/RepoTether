@@ -4,7 +4,9 @@
 どちらかを入れてください (Windows 10 / 11、64 bit)。
 
 - **`RepoTether_<版>_x64-setup.exe`** — インストーラー。スタートメニューに登録します。WebView2 が無ければ入れます
-- **`RepoTether-<版>-win-x64.zip`** — 展開した `RepoTether.exe` を起動するだけです
+- **`RepoTether-<版>-win-x64.zip`** — 展開した `RepoTether.exe` を起動するだけです。隣の `offstage.exe` は同じフォルダに置いたままにしてください
+
+どちらにも、git に入れていない手元のファイルを見張る Offstage (`offstage.exe`) が入っています。別に入れる必要はありません。
 
 署名していないので、初回は SmartScreen が「PC が保護されました」と出します。「詳細情報」→「実行」で起動してください。
 

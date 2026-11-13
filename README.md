@@ -33,6 +33,8 @@
 
 gitignore して手元だけに置いているファイル (`sandbox/` など) を洗い出し、消えた・動いたものに印を出し、
 Claude の会話に出た場面 (中身まで送ったのか名前だけか) までたどる。通信しない。
+RepoTether のインストーラーと zip に入っていて (`offstage.exe` が `RepoTether.exe` の隣に入る)、別に入れなくてよい。
+RepoTether が起動時に裏で取り込ませ、印のあるリポジトリの行に札を出す。行の「Offstage」で開く。
 → [apps/offstage/README.md](apps/offstage/README.md)
 
 ## 動作環境

@@ -2,11 +2,15 @@
 REM Offstage launcher (docs/offstage/concept.md).
 REM   run-offstage.bat         start the release exe (build first if it is missing or the sources are newer)
 REM   run-offstage.bat build   force a rebuild, then start
+REM   run-offstage.bat ensure  build if missing or stale, but do not start (run-repotether.bat calls this:
+REM                            RepoTether finds offstage.exe next to repotether.exe and runs "--refresh")
 REM Always build with the Tauri CLI. "cargo build" makes an exe that does not embed the UI.
+setlocal
 chcp 65001 >nul
-title Offstage
+if /i not "%~1"=="ensure" title Offstage
 set "PATH=%USERPROFILE%\.cargo\bin;%PATH%"
 cd /d "%~dp0"
+if /i "%~1"=="ensure" set "NOSTART=1"
 
 set "EXE=%~dp0src-tauri\target\release\offstage.exe"
 
@@ -43,6 +47,7 @@ popd
 if not "%RC%"=="0" goto :fail
 
 :start
+if defined NOSTART goto :eof
 start "" "%EXE%"
 goto :eof
 

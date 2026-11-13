@@ -3,6 +3,8 @@ name: release
 # タグを打つ = リリース。版はタグが正で、コード側 (package.json / src-tauri/Cargo.toml /
 # src-tauri/tauri.conf.json) と食い違っていたらビルドせずに落とす。
 # テストとビルドが通ったら、zip とインストーラーを付けた Release をそのまま公開する (下書きにしない)。
+# Offstage (apps/offstage) も同じ版のソースから作って、RepoTether.exe と同じフォルダに入れる
+# (RepoTether は隣の offstage.exe を最初に探す。版が食い違うと --refresh を知らない Offstage が窓を開き、RepoTether が待ち続ける)。
 #   git tag v0.1.0 && git push origin v0.1.0
 #
 # workflow_dispatch で手動実行するとビルドと検証だけ行い、成果物は Actions の artifact に置く (Release は作らない)。
@@ -84,10 +86,25 @@ jobs:
           cargo test --lib
           if ($LASTEXITCODE -ne 0) { throw "Rust のテストが失敗しました" }
           Pop-Location
+          cargo test -p offstage-core -p offstage
+          if ($LASTEXITCODE -ne 0) { throw "Offstage のテストが失敗しました" }
+
+      # Offstage は Tauri の CLI で作る (cargo build だと画面の入っていない exe になる)。
+      # 作った exe を src-tauri/bundle-extra に写し、tauri.bundle.json でインストーラーに入れる
+      # (target/release のものを直接指すと、tauri-build が同じファイルへ自分自身を写そうとする)
+      - name: ビルド (Offstage)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location apps/offstage/src-tauri
+          & ../../../node_modules/.bin/tauri.cmd build --no-bundle
+          if ($LASTEXITCODE -ne 0) { throw "Offstage のビルドが失敗しました" }
+          Pop-Location
+          New-Item -ItemType Directory -Force src-tauri/bundle-extra | Out-Null
+          Copy-Item src-tauri/target/release/offstage.exe src-tauri/bundle-extra/offstage.exe
 
       - name: ビルド (exe とインストーラー)
         run: |
-          pnpm tauri build --bundles nsis
+          pnpm tauri build --bundles nsis --config src-tauri/tauri.bundle.json
           if ($LASTEXITCODE -ne 0) { throw "ビルドが失敗しました" }
 
       - name: 成果物を確かめて zip を作る
@@ -103,9 +120,14 @@ jobs:
           $setup = Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
           if (-not $setup) { throw "インストーラーがありません" }
           if ($setup.Name -notmatch [regex]::Escape($version)) { throw "インストーラーの名前 ($($setup.Name)) に版 $version が入っていません" }
+          # インストーラーの一番上 (= RepoTether.exe と同じフォルダ) に offstage.exe があること
+          $listing = & 7z l -slt $setup.FullName
+          if ($LASTEXITCODE -ne 0) { throw "インストーラーの中身を読めません" }
+          if (-not ($listing | Select-String -Pattern '^Path = offstage\.exe$')) { throw "インストーラーに offstage.exe が入っていません" }
 
           New-Item -ItemType Directory -Force dist/RepoTether | Out-Null
           Copy-Item $exe dist/RepoTether/RepoTether.exe
+          Copy-Item src-tauri/target/release/offstage.exe dist/RepoTether/offstage.exe
           Copy-Item LICENSE, README.md dist/RepoTether/
           Compress-Archive -Path dist/RepoTether -DestinationPath 'dist/${{ steps.version.outputs.zip }}'
           Copy-Item $setup.FullName dist/

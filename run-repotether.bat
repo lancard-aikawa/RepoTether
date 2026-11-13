@@ -54,6 +54,10 @@ call pnpm tauri build --no-bundle
 if errorlevel 1 goto :fail
 
 :start
+REM Offstage (apps/offstage) sits next to repotether.exe; RepoTether runs it in the background.
+REM Build it too when missing or stale, so both exes come from the same sources. RepoTether still starts if this fails.
+call "%~dp0run-offstage.bat" ensure
+title RepoTether
 start "" "%EXE%"
 goto :eof
 

@@ -8,6 +8,7 @@ Offstage はそれらをリポジトリごとに洗い出して記録し、前�
 Claude Code の会話の記録 (`~/.claude/projects`) から、そのファイルが会話に出た場面と、中身まで送ったのか名前だけかを拾う。
 
 [RepoTether](../../README.md) と同じリポジトリの別アプリ。探すフォルダは RepoTether の設定から借りる。
+RepoTether は起動時に Offstage を裏で走らせ (`offstage.exe --refresh`、窓は出ない)、印のあるリポジトリの行に札を出し、行の「Offstage」でそのリポジトリに絞って開く。
 
 ![一覧](../../docs/offstage/images/list.png)
 
@@ -39,7 +40,10 @@ Claude Code の会話の記録 (`~/.claude/projects`) から、そのファイ�
 
 ## インストール
 
-[Releases](https://github.com/lancard-aikawa/RepoTether/releases) の `offstage-v<版>` から、どちらかを入れる。
+**RepoTether を入れれば入っている** (RepoTether のインストーラーと zip に同じ版のソースから作った `offstage.exe` が入り、
+`RepoTether.exe` と同じフォルダに置かれる)。RepoTether の行や詳細の「Offstage」で開く。
+
+Offstage だけを使うときは、[Releases](https://github.com/lancard-aikawa/RepoTether/releases) の `offstage-v<版>` から、どちらかを入れる。
 
 - `Offstage_<版>_x64-setup.exe` — インストーラー
 - `Offstage-<版>-win-x64.zip` — 展開した `Offstage.exe` を起動するだけ
