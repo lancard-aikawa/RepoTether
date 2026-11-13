@@ -19,6 +19,7 @@
   import AssessBlock from "./AssessBlock.svelte";
   import JudgeTag from "./JudgeTag.svelte";
   import RepoIcon from "./RepoIcon.svelte";
+  import ToolInstall from "./ToolInstall.svelte";
 
   let { projects, now }: { projects: Project[]; now: number } = $props();
 
@@ -222,6 +223,13 @@
   }
 
   let guiOpened = $state(false);
+
+  /** RepoTether が入れた LockWatch を使う (場所に入れて保存し、確かめる) */
+  async function useInstalled(dir: string) {
+    path = dir;
+    await savePath();
+    await checkLockwatch();
+  }
 
   /** LockWatch の画面 (lockwatch gui) は 0.2.0 から。古い LockWatch では押せないようにする */
   const hasGui = (version: string) => vulnsLib.lockwatchAtLeast(version, 0, 2);
@@ -608,6 +616,7 @@
       <strong>非公開のリポジトリと公開か分からないものは、LockWatch がパッケージ名を外に出さず、手元の脆弱性 DB で照合します。</strong>
       公開とみなすのは github.com で公開のものだけで、Gogs・Gitea などの自前のサーバーのものは非公開として渡します。
     </p>
+    <ToolInstall id="lockwatch" current={savedPath} note="Python は要りません。osv-scanner も (PATH に無ければ) 一緒に入れます" onUse={useInstalled} />
     <div class="grid">
       <label for="lockwatch-path">LockWatch の場所</label>
       <div class="inline">
@@ -650,17 +659,13 @@
     {#if !path.trim()}
       <h3>使い始めるには</h3>
       <ol class="note steps">
+        <li>上の「入れる」で LockWatch と osv-scanner を入れる (場所の設定もします)</li>
+        <li>「LockWatch を開く」で LockWatch の画面を開き、「定期実行を登録」を押す (毎日照合します)。すぐ見たければ「全体を照合」</li>
         <li>
-          osv-scanner を入れる:
-          <code>{api.OSV_SCANNER_INSTALL}</code>
-          <button class="small" onclick={() => copyText(api.OSV_SCANNER_INSTALL)}>コピー</button>
-        </li>
-        <li>
-          LockWatch を入れる (Python 3.11 以上と uv が要ります。手順は
+          自分で置いた LockWatch (リポジトリを clone したもの) を使うなら、上の「LockWatch の場所」にそのフォルダを指定し、
+          「確かめる」で使えるかを見てから保存する (手順は
           <button class="link" onclick={() => api.openUrl(api.LOCKWATCH_URL + "#入れ方")}>LockWatch の README</button>)
         </li>
-        <li>上の「LockWatch の場所」に LockWatch のフォルダを指定し、「確かめる」で使えるかを見てから保存する</li>
-        <li>LockWatch の定期実行を登録する (<code>{api.LOCKWATCH_REGISTER}</code>)</li>
       </ol>
     {:else if lw.state === "error"}
       <p class="err">{lw.text}</p>

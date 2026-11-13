@@ -282,6 +282,55 @@ fn offstage_open(repo: Option<String>) -> Result<(), String> {
     core::offstage::open(&exe, repo.as_deref())
 }
 
+// ---- RepoTether から入れる道具 (LockWatch・ToolKeeper、docs/tools-install.md) ----
+
+fn tool_spec(id: &str) -> Result<&'static core::tools::Spec, String> {
+    core::tools::spec(id).ok_or_else(|| format!("知らない道具です: {id}"))
+}
+
+/// 入れた版と入れる場所 (ネットにはつながない)
+#[tauri::command]
+fn tool_info(id: String) -> Result<core::tools::Info, String> {
+    core::tools::info(tool_spec(&id)?)
+}
+
+/// GitHub の Release の最新版 (入れられる版と大きさ)
+#[tauri::command]
+async fn tool_latest(id: String) -> Result<core::tools::Latest, String> {
+    let spec = tool_spec(&id)?;
+    core::tools::latest(&core::tools::client()?, spec).await
+}
+
+/// 入れる・更新を同時に 2 つ走らせない
+static TOOL_INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 最新版を入れる (入れてあれば、設定とデータを残して入れ替える)。LockWatch なら、PATH に無ければ osv-scanner も隣に置く。
+/// 場所の設定は画面の側で書く (このあと「LockWatch の場所」などに dir を入れて保存する)
+#[tauri::command]
+async fn tool_install(id: String) -> Result<core::tools::Info, String> {
+    use std::sync::atomic::Ordering;
+    let spec = tool_spec(&id)?;
+    if TOOL_INSTALLING.swap(true, Ordering::SeqCst) {
+        return Err("ほかの道具を入れているところです。終わるまで待ってください".into());
+    }
+    let r = async {
+        let client = core::tools::client()?;
+        let info = core::tools::install_latest(&client, spec).await?;
+        if spec.id == core::tools::LOCKWATCH.id {
+            let dir = PathBuf::from(&info.dir);
+            if core::tools::osv_needed(&dir) {
+                core::tools::install_osv(&client, &dir)
+                    .await
+                    .map_err(|e| format!("LockWatch は入れましたが、osv-scanner を入れられません: {e}"))?;
+            }
+        }
+        Ok(info)
+    }
+    .await;
+    TOOL_INSTALLING.store(false, Ordering::SeqCst);
+    r
+}
+
 /// 社員向けの一覧 (LockWatch の report --share) を書いて、index.html を既定のブラウザで開く。
 /// 先に targets.json を今の一覧と設定にそろえる (載せる場所・廃止の印を変えた直後でも効くように)
 #[tauri::command]
@@ -902,7 +951,10 @@ pub fn run() {
             toolkeeper_open_gui,
             offstage_status,
             offstage_refresh,
-            offstage_open
+            offstage_open,
+            tool_info,
+            tool_latest,
+            tool_install
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

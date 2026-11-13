@@ -8,6 +8,7 @@
   import { relative, toMs } from "$lib/format";
   import { app, errorText, loadTools, toast, updateConfig } from "$lib/store.svelte";
   import * as toolsLib from "$lib/tools";
+  import ToolInstall from "./ToolInstall.svelte";
 
   let { now }: { now: number } = $props();
 
@@ -81,6 +82,13 @@
     } finally {
       saving = false;
     }
+  }
+
+  /** RepoTether が入れた ToolKeeper を使う (場所に入れて保存し、確かめる) */
+  async function useInstalled(dir: string) {
+    path = dir;
+    await savePath();
+    await checkToolkeeper();
   }
 
   /** 入力中の場所が、確かめて使えると分かった場所のままか */
@@ -197,8 +205,9 @@
     <p class="note">
       ToolKeeper は、この PC に入れた道具 (PHP・Ghostscript・Cygwin と、winget・choco で入れたもの) が古くなっていないかを週に 1 回調べ、
       選んだものを最新に上げる別の道具です (入れなくても RepoTether は使えます)。場所を指定すると、その結果をこのタブに出します。
-      RepoTether は結果を読むだけで、何も入れません。
+      RepoTether は結果を読むだけで、PC の道具を上げることはしません (上げるのは ToolKeeper の画面で)。
     </p>
+    <ToolInstall id="toolkeeper" current={savedPath} note="Python は要りません" onUse={useInstalled} />
     <div class="grid">
       <label for="toolkeeper-path">ToolKeeper の場所</label>
       <div class="inline">
@@ -219,9 +228,12 @@
     {#if !path.trim()}
       <h3>使い始めるには</h3>
       <ol class="note steps">
-        <li>ToolKeeper を置く (Python 3.11 以上が要ります。依存は標準ライブラリだけで、.venv は要りません)</li>
-        <li>上の「ToolKeeper の場所」に ToolKeeper のフォルダを指定し、「確かめる」で使えるかを見てから保存する</li>
-        <li>ToolKeeper の定期実行を登録する (<code>{api.TOOLKEEPER_REGISTER}</code>)</li>
+        <li>上の「入れる」で ToolKeeper を入れる (場所の設定もします)</li>
+        <li>「ToolKeeper を開く」で ToolKeeper の画面を開き、定期実行を登録する (週に 1 回調べます)。すぐ見たければ「調べ直す」</li>
+        <li>
+          自分で置いた ToolKeeper (リポジトリを clone したもの) を使うなら、上の「ToolKeeper の場所」にそのフォルダを指定し、
+          「確かめる」で使えるかを見てから保存する
+        </li>
       </ol>
     {:else if tk.state === "error"}
       <p class="err">{tk.text}</p>

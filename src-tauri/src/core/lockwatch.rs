@@ -26,41 +26,50 @@ const CONFIG_TIMEOUT: Duration = Duration::from_secs(30);
 /// Claude Code にリポジトリを読ませる (`assess`)。1 回で数分。LockWatch の側の打ち切り (30 分) より少し長く待つ
 const ASSESS_TIMEOUT: Duration = Duration::from_secs(35 * 60);
 
-/// LockWatch の呼び方 (`python -m lockwatch`)
+/// LockWatch の呼び方 (`python -m lockwatch`、または exe の lockwatch.exe)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Runner {
     python: PathBuf,
     python_args: Vec<String>,
     src: PathBuf,
+    /// exe の形 (LockWatch の design.md §9.1。RepoTether の「入れる」が入れるもの) なら、そのフォルダ。
+    /// コマンドは lockwatch.exe、画面は窓を出さない lockwatchw.exe で動かす
+    exe_dir: Option<PathBuf>,
 }
 
-/// 設定の「LockWatch の場所」(LockWatch のリポジトリのフォルダ) から呼び方を決める。
-/// そのフォルダの .venv の Python があればそれを、無ければ py ランチャー (python) を使う
+/// 設定の「LockWatch の場所」から呼び方を決める。
+/// exe の形 (lockwatch.exe と lockwatchw.exe がある) ならそれを使う。
+/// リポジトリのフォルダなら、そのフォルダの .venv の Python があればそれを、無ければ py ランチャー (python) を使う
 pub fn resolve(dir: &str) -> Result<Runner, String> {
     let dir = PathBuf::from(dir.trim());
+    if dir.join("lockwatch.exe").is_file() && dir.join("lockwatchw.exe").is_file() {
+        return Ok(Runner { python: dir.join("lockwatch.exe"), python_args: vec![], src: dir.clone(), exe_dir: Some(dir) });
+    }
     let src = dir.join("src");
     if !src.join("lockwatch").join("__init__.py").is_file() {
         return Err(format!(
-            "{} は LockWatch のリポジトリではありません。設定の「LockWatch の場所」を確かめてください",
+            "{} は LockWatch のフォルダではありません (lockwatch.exe も src も無い)。「LockWatch の場所」を確かめてください",
             dir.display()
         ));
     }
     let venv = if cfg!(windows) { dir.join(".venv").join("Scripts").join("python.exe") } else { dir.join(".venv").join("bin").join("python") };
     if venv.is_file() {
-        return Ok(Runner { python: venv, python_args: vec![], src });
+        return Ok(Runner { python: venv, python_args: vec![], src, exe_dir: None });
     }
     let (python, python_args) = sessionvault::find_python()
         .map_err(|_| "LockWatch を動かす Python (3.11 以上) が見つかりません。LockWatch のフォルダで uv sync を実行してください".to_string())?;
-    Ok(Runner { python, python_args, src })
+    Ok(Runner { python, python_args, src, exe_dir: None })
 }
 
 fn command(r: &Runner) -> Command {
     let mut cmd = Command::new(&r.python);
-    cmd.args(&r.python_args)
-        .args(["-m", "lockwatch"])
-        .env("PYTHONPATH", &r.src)
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env("PYTHONIOENCODING", "utf-8")
+    if r.exe_dir.is_none() {
+        cmd.args(&r.python_args)
+            .args(["-m", "lockwatch"])
+            .env("PYTHONPATH", &r.src)
+            .env("PYTHONDONTWRITEBYTECODE", "1");
+    }
+    cmd.env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -189,6 +198,12 @@ fn base_pythonw(r: &Runner) -> Option<PathBuf> {
 
 /// LockWatch の画面 (`lockwatch gui`) を開く。終わるのを待たない
 pub fn open_gui(r: &Runner) -> Result<(), String> {
+    if let Some(dir) = &r.exe_dir {
+        // 窓を出さない版 (PE の subsystem が GUI) なので、黒い窓は出ない
+        let mut cmd = Command::new(dir.join("lockwatchw.exe"));
+        cmd.arg("gui").current_dir(dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        return cmd.spawn().map(|_| ()).map_err(|e| format!("LockWatch の画面を開けません: {e}"));
+    }
     let mut cmd = match base_pythonw(r) {
         // 本体の pythonw.exe には、py ランチャー用の引数 (-3) は付けない
         Some(w) => Command::new(w),
@@ -1150,7 +1165,7 @@ mod tests {
     #[test]
     fn folder_must_be_lockwatch() {
         let d = tmp("notlw");
-        assert!(resolve(&d.to_string_lossy()).unwrap_err().contains("LockWatch のリポジトリではありません"));
+        assert!(resolve(&d.to_string_lossy()).unwrap_err().contains("LockWatch のフォルダではありません"));
         let _ = std::fs::remove_dir_all(d);
     }
 }

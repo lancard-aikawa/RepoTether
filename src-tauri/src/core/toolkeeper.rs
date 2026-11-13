@@ -22,13 +22,16 @@ const STATUS_TIMEOUT: Duration = Duration::from_secs(30);
 /// 読める check.json の形 (ToolKeeper の check.SCHEMA)
 pub const SCHEMA: u32 = 1;
 
-/// ToolKeeper の呼び方 (`python -m toolkeeper`)
+/// ToolKeeper の呼び方 (`python -m toolkeeper`、または exe の toolkeeper.exe)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Runner {
     dir: PathBuf,
     python: PathBuf,
     python_args: Vec<String>,
     src: PathBuf,
+    /// exe の形 (ToolKeeper の design.md §9.3。RepoTether の「入れる」が入れるもの) か。
+    /// コマンドは toolkeeper.exe、画面は窓を出さない toolkeeperw.exe で動かす
+    exe: bool,
 }
 
 /// 設定の「ToolKeeper の場所」(ToolKeeper のリポジトリのフォルダ) から呼び方を決める。
@@ -36,30 +39,32 @@ pub struct Runner {
 /// (ToolKeeper は標準ライブラリだけなので .venv は無くてよい)
 pub fn resolve(dir: &str) -> Result<Runner, String> {
     let dir = PathBuf::from(dir.trim());
+    if dir.join("toolkeeper.exe").is_file() && dir.join("toolkeeperw.exe").is_file() {
+        return Ok(Runner { python: dir.join("toolkeeper.exe"), python_args: vec![], src: dir.clone(), dir, exe: true });
+    }
     let src = dir.join("src");
     if !src.join("toolkeeper").join("__init__.py").is_file() {
         return Err(format!(
-            "{} は ToolKeeper のリポジトリではありません。「ToolKeeper の場所」を確かめてください",
+            "{} は ToolKeeper のフォルダではありません (toolkeeper.exe も src も無い)。「ToolKeeper の場所」を確かめてください",
             dir.display()
         ));
     }
     let venv = dir.join(".venv").join("Scripts").join("python.exe");
     if venv.is_file() {
-        return Ok(Runner { dir, python: venv, python_args: vec![], src });
+        return Ok(Runner { dir, python: venv, python_args: vec![], src, exe: false });
     }
     let (python, python_args) = sessionvault::find_python()
         .map_err(|_| "ToolKeeper を動かす Python (3.11 以上) が見つかりません".to_string())?;
-    Ok(Runner { dir, python, python_args, src })
+    Ok(Runner { dir, python, python_args, src, exe: false })
 }
 
 /// 終わるまで待つ (出力は別のスレッドで読む。パイプが詰まって子が止まらないように)
 fn run(r: &Runner, args: &[&str], timeout: Duration) -> Result<(Option<i32>, String, String), String> {
     let mut cmd = Command::new(&r.python);
-    cmd.args(&r.python_args)
-        .args(["-m", "toolkeeper"])
-        .args(args)
-        .env("PYTHONPATH", &r.src)
-        .env("PYTHONDONTWRITEBYTECODE", "1")
+    if !r.exe {
+        cmd.args(&r.python_args).args(["-m", "toolkeeper"]).env("PYTHONPATH", &r.src).env("PYTHONDONTWRITEBYTECODE", "1");
+    }
+    cmd.args(args)
         .env("PYTHONIOENCODING", "utf-8")
         .current_dir(&r.dir)
         .stdin(Stdio::null())
@@ -256,6 +261,12 @@ pub struct ToolsReport {
 /// ToolKeeper の scripts/toolkeeper-gui.cmd を使う (本体の pythonw.exe を探して黒い窓を出さずに開く。
 /// .venv の pythonw.exe は uv 0.11 ではコンソール用で黒い窓が出るので使わない、という判断を ToolKeeper の側に任せる)
 pub fn open_gui(r: &Runner) -> Result<(), String> {
+    if r.exe {
+        // 窓を出さない版 (PE の subsystem が GUI) なので、黒い窓は出ない
+        let mut cmd = Command::new(r.dir.join("toolkeeperw.exe"));
+        cmd.arg("gui").current_dir(&r.dir).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        return cmd.spawn().map(|_| ()).map_err(|e| format!("ToolKeeper の画面を開けません: {e}"));
+    }
     let launcher = r.dir.join("scripts").join("toolkeeper-gui.cmd");
     if !launcher.is_file() {
         return Err(format!("{} がありません。ToolKeeper を更新してください (git pull)", launcher.display()));
@@ -364,6 +375,6 @@ mod tests {
     fn resolve_rejects_other_folders() {
         let dir = std::env::temp_dir().join("repotether-toolkeeper-not-repo");
         let _ = std::fs::create_dir_all(&dir);
-        assert!(resolve(&dir.to_string_lossy()).unwrap_err().contains("ToolKeeper のリポジトリではありません"));
+        assert!(resolve(&dir.to_string_lossy()).unwrap_err().contains("ToolKeeper のフォルダではありません"));
     }
 }

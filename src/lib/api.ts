@@ -94,6 +94,8 @@ type MockHooks = {
   __mockTools?: ToolsReport;
   __mockToolkeeperStatus?: ToolkeeperStatus;
   __mockOffstage?: OffstageStatus;
+  /** 道具 id → 入れた状態と最新版 (ブラウザ表示・画面の画像用) */
+  __mockToolInstall?: Record<string, { info: ToolInfo; latest: ToolLatest | string }>;
   __mockPull?: PullResult | string;
   __mockPullDelay?: number;
   /** パス → アイコンの URL (data: など) */
@@ -279,6 +281,53 @@ export async function offstageRefresh(): Promise<OffstageStatus> {
 export async function offstageOpen(repo?: string | null): Promise<void> {
   if (!inTauri) throw new Error("ブラウザ表示では開けません");
   return call("offstage_open", { repo: repo ?? null });
+}
+
+// ---- RepoTether から入れる道具 (LockWatch・ToolKeeper、docs/tools-install.md) ----
+
+export type ToolId = "lockwatch" | "toolkeeper";
+
+/** 入れた状態。installed が null ならまだ入れていない。dir は入れる場所 (入れる前から決まっている) */
+export interface ToolInfo {
+  id: ToolId;
+  name: string;
+  dir: string;
+  installed: string | null;
+}
+
+/** GitHub の Release の最新版 */
+export interface ToolLatest {
+  version: string;
+  asset: string;
+  size: number;
+}
+
+function mockTool(id: ToolId) {
+  const m = hooks().__mockToolInstall?.[id];
+  if (!m) throw new Error("ブラウザ表示では入れられません");
+  return m;
+}
+
+/** 入れた版と入れる場所 (ネットにはつながない) */
+export async function toolInfo(id: ToolId): Promise<ToolInfo> {
+  if (!inTauri) return mockTool(id).info;
+  return call("tool_info", { id });
+}
+
+/** 入れられる最新版 (GitHub につなぐ) */
+export async function toolLatest(id: ToolId): Promise<ToolLatest> {
+  if (!inTauri) {
+    const l = mockTool(id).latest;
+    if (typeof l === "string") throw new Error(l);
+    return l;
+  }
+  return call("tool_latest", { id });
+}
+
+/** 最新版を入れる (入れてあれば設定とデータを残して入れ替える)。LockWatch なら osv-scanner も (PATH に無ければ) */
+export async function toolInstall(id: ToolId): Promise<ToolInfo> {
+  if (!inTauri) throw new Error("ブラウザ表示では入れられません");
+  return call("tool_install", { id });
 }
 
 /** LockWatch の結果 (手元のリポジトリごと)。LockWatch を使わない設定なら configured: false */

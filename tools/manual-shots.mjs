@@ -614,6 +614,18 @@ const OFFSTAGE = {
   },
 };
 
+// RepoTether から入れる道具。LockWatch は入れた版より新しい版がある、ToolKeeper は自分で置いたものを使っていて、まだ入れていない
+const TOOL_INSTALL = {
+  lockwatch: {
+    info: { id: "lockwatch", name: "LockWatch", dir: "C:\\Tools\\LockWatch", installed: "0.7.0" },
+    latest: { version: "0.8.0", asset: "LockWatch-0.8.0-win-x64.zip", size: 15528960 },
+  },
+  toolkeeper: {
+    info: { id: "toolkeeper", name: "ToolKeeper", dir: "C:\\Users\\demo\\AppData\\Local\\RepoTether\\tools\\ToolKeeper", installed: null },
+    latest: { version: "0.4.0", asset: "ToolKeeper-0.4.0-win-x64.zip", size: 14575616 },
+  },
+};
+
 // ---- 撮影 ----
 async function main() {
   mkdirSync(OUT, { recursive: true });
@@ -632,13 +644,14 @@ async function main() {
       page.setDefaultTimeout(8000);
       await page.route("**/dev-snapshot.json", (route) => route.fulfill({ json: snapshot }));
       await page.addInitScript(
-        ({ config, readme, prefs, transcript, icons, linkIcons, vulns, lockwatchStatus, tools, toolkeeperStatus, offstage }) => {
+        ({ config, readme, prefs, transcript, icons, linkIcons, vulns, lockwatchStatus, tools, toolkeeperStatus, offstage, toolInstall }) => {
           window.__mockConfig = config;
           window.__mockVulns = vulns;
           window.__mockLockwatchStatus = lockwatchStatus;
           window.__mockTools = tools;
           window.__mockToolkeeperStatus = toolkeeperStatus;
           window.__mockOffstage = offstage;
+          window.__mockToolInstall = toolInstall;
           window.__mockLinkIcons = linkIcons;
           // マニュアルには「ブラウザ表示」の印を出さない。開発サーバーが起動直後にページを読み込み直しても
           // 消えないよう、読み込みのたびに入れる
@@ -666,6 +679,7 @@ async function main() {
           tools: TOOLS,
           toolkeeperStatus: TOOLKEEPER_STATUS,
           offstage: OFFSTAGE,
+          toolInstall: TOOL_INSTALL,
           prefs,
           transcript: TRANSCRIPT.map((e, i) => ({ at: transcriptTimes[i], tools: [], ...e })),
         },
@@ -744,6 +758,18 @@ async function main() {
       ["tools", "20_tools.png"],
     ]) {
       page = await open({ tab });
+      await shot(page, file);
+      await page.close();
+    }
+
+    // 道具を入れる欄 (LockWatch は更新あり、ToolKeeper はまだ入れていない)
+    for (const [tab, file] of [
+      ["vulns", "19b_vulns_install.png"],
+      ["tools", "20b_tools_install.png"],
+    ]) {
+      page = await open({ tab });
+      await page.locator(".tool-install").first().scrollIntoViewIfNeeded();
+      await page.evaluate(() => document.querySelector(".tool-install")?.closest("section")?.scrollIntoView({ block: "start" }));
       await shot(page, file);
       await page.close();
     }
