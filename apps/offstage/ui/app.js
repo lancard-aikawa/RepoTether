@@ -134,7 +134,7 @@ function period() {
 let rows = [];
 let selected = null; // {repo, relPath}
 let alertFilter = ""; // missing / moved / sent / ""
-/// 内訳の「一覧」で絞ったフォルダ ({repo, folder})。null なら絞らない
+/// 表示「区分」の「一覧」で絞ったフォルダ ({repo, folder, from})。from は外したときに戻る表示。null なら絞らない
 let folderFilter = null;
 /// 人が対象外にしたリポジトリ (overview から)
 let excludedRepos = [];
@@ -265,18 +265,23 @@ function renderList() {
   else renderTable();
 }
 
-/// 内訳の「一覧」で絞ったフォルダの札 (押すと外す)
+/// 表示「区分」の「一覧」で絞ったフォルダの札 (押すと外し、元の表示に戻る)
 function renderFolderChip() {
   const c = $("folder-chip");
   c.hidden = !folderFilter;
   if (folderFilter) c.innerHTML = `${ico("clear")}${esc(base(folderFilter.repo))}/${esc(folderFilter.folder || "")}`;
 }
-$("folder-chip").onclick = () => {
+/// フォルダの絞り込みを外す。表示「区分」の「一覧」から来たなら、そこへ戻る
+function clearFolderFilter() {
+  const back = folderFilter?.from;
   folderFilter = null;
-  loadRows();
-};
+  // 「一覧」で開いた表のまま外したときだけ戻る (自分でツリーなどに切り替えていたら、その表示のまま)
+  if (back && viewMode === "table") setView(back);
+  else loadRows();
+}
+$("folder-chip").onclick = clearFolderFilter;
 
-/// 内訳: フォルダごとの区分別の件数。件数の多いフォルダから、まとめて区分を付け替えられる
+/// 表示「区分」: フォルダごとの区分別の件数。件数の多いフォルダから、まとめて区分を付け替えられる
 async function loadBreakdown() {
   renderList();
   let groups;
@@ -325,7 +330,7 @@ async function loadBreakdown() {
         .catch(alertError);
     };
     el.querySelector(".g-list").onclick = () => {
-      folderFilter = { repo: g.repo, folder: g.folder };
+      folderFilter = { repo: g.repo, folder: g.folder, from: "sum" };
       setView("table");
     };
   });
@@ -552,7 +557,7 @@ async function showDetail(repo, relPath) {
         : `<h3>リポジトリ</h3>
     <p class="note" id="repo-info">${esc(base(r.repo))} を調べています…</p>
     <div class="actions">
-      <button type="button" class="btn danger" id="act-exclude" title="このリポジトリを取り込みの対象から外し、記録からも外す（2 回押して確定。内訳の画面から戻せる）">${ico("clear")}対象外</button>
+      <button type="button" class="btn danger" id="act-exclude" title="このリポジトリを取り込みの対象から外し、記録からも外す（2 回押して確定。表示「区分」の下から戻せる）">${ico("clear")}対象外</button>
     </div>`
     }
     <h3>会話 ${d.scenes.length ? `（${d.scenes.length}）` : ""}</h3>
@@ -592,7 +597,7 @@ async function showDetail(repo, relPath) {
         if (folderFilter && folderFilter.repo === repo) folderFilter = null;
         if ($("q-repo").value === repo) $("q-repo").value = "";
         await reloadAll();
-        $("status").textContent = `${base(repo)} を対象外にしました（記録から ${n} 件を外しました。「内訳」の下から戻せます）`;
+        $("status").textContent = `${base(repo)} を対象外にしました（記録から ${n} 件を外しました。表示「区分」の下から戻せます）`;
       } catch (e) {
         b.disabled = false;
         alertError(e);
@@ -855,8 +860,9 @@ $("clear").onclick = () => {
   for (const id of ["q-class", "q-state", "q-mention", "q-repo", "q-period"]) $(id).value = "";
   $("q-range").hidden = true;
   alertFilter = "";
+  const back = folderFilter?.from;
   folderFilter = null;
-  loadOverview().then(loadRows);
+  loadOverview().then(() => (back && viewMode === "table" ? setView(back) : loadRows()));
 };
 
 // 見本の画面を撮るときだけ: 起動してすぐ取り込み、指定の行を選ぶ (環境変数 OFFSTAGE_AUTOREFRESH / OFFSTAGE_SELECT)

@@ -76,7 +76,7 @@ pub struct Alerts {
     pub docs: i64,
 }
 
-/// 内訳の 1 行: フォルダごとの区分別の件数
+/// 表示「区分」の 1 行: フォルダごとの区分別の件数
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Group {
@@ -89,7 +89,7 @@ pub struct Group {
     pub repo_gone: bool,
 }
 
-/// 内訳でまとめるフォルダ: ファイルの入っているフォルダの、上から `depth` 段まで
+/// 表示「区分」でまとめるフォルダ: ファイルの入っているフォルダの、上から `depth` 段まで
 pub fn group_folder(rel_path: &str, is_dir: bool, depth: usize) -> String {
     let parts: Vec<&str> = rel_path.split('/').collect();
     let dirs = if is_dir { &parts[..] } else { &parts[..parts.len().saturating_sub(1)] };
@@ -144,7 +144,7 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Row> {
 }
 
 impl Store {
-    /// 検索の条件を SQL の WHERE にする (検索と内訳で同じ)
+    /// 検索の条件を SQL の WHERE にする (検索と表示「区分」で同じ)
     fn where_of(q: &Query) -> (String, Vec<String>) {
         let mut wh: Vec<String> = Vec::new();
         let mut args: Vec<String> = Vec::new();
@@ -226,7 +226,7 @@ impl Store {
         rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     }
 
-    /// 内訳: 検索と同じ条件に当たるものを、フォルダ (上から `depth` 段) ごとに区分別に数える。件数の多い順に `limit` 件
+    /// 表示「区分」: 検索と同じ条件に当たるものを、フォルダ (上から `depth` 段) ごとに区分別に数える。件数の多い順に `limit` 件
     pub fn breakdown(&self, q: &Query, depth: usize, limit: usize) -> Result<Vec<Group>, String> {
         use std::collections::HashMap;
         let (wh, args) = Self::where_of(q);

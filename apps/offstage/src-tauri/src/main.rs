@@ -113,7 +113,7 @@ fn search(st: St, q: Query) -> Result<Vec<Row>, String> {
     with_store(&st, |s| s.search(&q))
 }
 
-/// 内訳: 検索と同じ条件で、フォルダ (上から depth 段) ごとの区分別の件数。多い順に 300 件まで
+/// 表示「区分」: 検索と同じ条件で、フォルダ (上から depth 段) ごとの区分別の件数。多い順に 300 件まで
 #[tauri::command]
 fn breakdown(st: St, q: Query, depth: usize) -> Result<Vec<Group>, String> {
     with_store(&st, |s| s.breakdown(&q, depth.clamp(1, 6), 300))

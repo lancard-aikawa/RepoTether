@@ -303,7 +303,7 @@ tbody tr.group .cnt { margin-left: 8px; color: var(--muted); font-weight: 400; f
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); font-weight: 600; cursor: default; }
 .seg button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
-/* 内訳: フォルダごとの区分別の件数。行そのものは押せない (押せるのは中のボタンと選択) */
+/* 表示「区分」: フォルダごとの区分別の件数。行そのものは押せない (押せるのは中のボタンと選択) */
 .breakdown { padding: 0 0 12px; }
 .breakdown[hidden] { display: none; }
 .grp {
