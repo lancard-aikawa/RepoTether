@@ -43,16 +43,33 @@
       <label class="field" data-f="q-from"><span class="lbl">開始</span><input id="q-from" type="date" title="この日を含む"></label>
       <label class="field" data-f="q-to"><span class="lbl">終了</span><input id="q-to" type="date" title="この日を含む"></label>
     </span>
-    <label class="field narrow" data-f="q-ext"><span class="lbl"><span class="ico" data-ico="file"></span>種類</span>
-      <input id="q-ext" type="text" placeholder="md" title="拡張子 (点なし)" autocomplete="off" spellcheck="false">
+    <label class="field" data-f="q-kind"><span class="lbl"><span class="ico" data-ico="file"></span>種類</span>
+      <select id="q-kind" title="ファイルの種類 (拡張子のまとまり)">
+        <option value="">すべて</option>
+        <option value="image">画像</option>
+        <option value="video">動画</option>
+        <option value="audio">音声</option>
+        <option value="text" title="md・txt など">文章</option>
+        <option value="office" title="PDF・Office・HTML">文書</option>
+        <option value="data" title="csv・json・sqlite など">データ</option>
+        <option value="code">プログラム</option>
+        <option value="archive">圧縮</option>
+        <option value="model">3D</option>
+        <option value="ext">拡張子</option>
+      </select>
     </label>
+    <span id="q-ext-box" hidden>
+      <label class="field narrow" data-f="q-ext"><span class="lbl">拡張子</span>
+        <input id="q-ext" type="text" placeholder="md" title="拡張子 (点なし)" autocomplete="off" spellcheck="false">
+      </label>
+    </span>
     <label class="field" data-f="q-repo"><span class="lbl"><span class="ico" data-ico="repo"></span>リポジトリ</span>
       <select id="q-repo"><option value="">すべて</option></select>
     </label>
     <span class="sep" aria-hidden="true"></span>
     <label class="field" data-f="q-class"><span class="lbl"><span class="ico" data-ico="tagi"></span>区分</span>
-      <select id="q-class">
-        <option value="">すべて（生成以外）</option>
+      <select id="q-class" title="すべて: 生成 (node_modules など) のものは除く">
+        <option value="">すべて</option>
         <option value="personal">個人</option>
         <option value="secret">機密</option>
         <option value="data">データ</option>

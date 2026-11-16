@@ -23,6 +23,8 @@ pub struct Query {
     pub mention: String,
     /// 拡張子 (小文字、点なし)
     pub ext: String,
+    /// 種類のまとまり (image / text など。facets::KIND_GROUPS)。知らない鍵なら何も当たらない
+    pub kind: String,
     /// 会話での出方 (read / attached / grep / edit / bash / tool / write / result / text)。どれかで出たもの
     pub kinds: Vec<String>,
     /// 更新時刻がこの時刻 (UNIX 秒) 以後のもの
@@ -185,6 +187,17 @@ impl Store {
             wh.push("lower(u.rel_path) LIKE ?".into());
             args.push(format!("%.{}", q.ext.to_lowercase()));
         }
+        if !q.kind.is_empty() {
+            match crate::facets::kind_exts(&q.kind) {
+                Some(exts) => {
+                    // 拡張子は記号を含まない固定の一覧なので、LIKE の % と _ を気にしなくてよい
+                    let likes = vec!["lower(u.rel_path) LIKE ?"; exts.len()].join(" OR ");
+                    wh.push(format!("(u.is_dir = 0 AND ({likes}))"));
+                    args.extend(exts.iter().map(|e| format!("%.{e}")));
+                }
+                None => wh.push("0".into()),
+            }
+        }
         match q.gone {
             Some(true) => wh.push("g.gone_since IS NOT NULL".into()),
             Some(false) => wh.push("g.gone_since IS NULL".into()),
@@ -229,13 +242,8 @@ impl Store {
     /// 表示「区分」: 検索と同じ条件に当たるものを、フォルダ (上から `depth` 段) ごとに区分別に数える。件数の多い順に `limit` 件
     pub fn breakdown(&self, q: &Query, depth: usize, limit: usize) -> Result<Vec<Group>, String> {
         use std::collections::HashMap;
-        let (wh, args) = Self::where_of(q);
-        let sql = format!("{} {}", union_sql(), wh);
-        let mut st = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let rows = st.query_map(params_from_iter(args.iter()), row).map_err(|e| e.to_string())?;
         let mut groups: HashMap<(String, String), (i64, HashMap<String, i64>, bool)> = HashMap::new();
-        for r in rows {
-            let r = r.map_err(|e| e.to_string())?;
+        for r in self.matching(q)? {
             let key = (r.repo.clone(), group_folder(&r.rel_path, r.is_dir, depth));
             let g = groups.entry(key).or_insert_with(|| (0, HashMap::new(), r.repo_gone));
             g.0 += 1;
@@ -252,6 +260,15 @@ impl Store {
         out.sort_by(|a, b| b.total.cmp(&a.total).then(a.repo.cmp(&b.repo)).then(a.folder.cmp(&b.folder)));
         out.truncate(limit);
         Ok(out)
+    }
+
+    /// 検索と同じ条件に当たるもの全部 (並びも件数の上限も無し)
+    pub fn matching(&self, q: &Query) -> Result<Vec<Row>, String> {
+        let (wh, args) = Self::where_of(q);
+        let sql = format!("{} {}", union_sql(), wh);
+        let mut st = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = st.query_map(params_from_iter(args.iter()), row).map_err(|e| e.to_string())?;
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
     }
 
     /// 1 件

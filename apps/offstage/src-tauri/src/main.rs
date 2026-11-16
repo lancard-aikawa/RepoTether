@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use offstage_core::classify::Class;
+use offstage_core::facets::{Facets, PeriodOpt};
 use offstage_core::scan::reason_for;
 use offstage_core::link::{default_projects_dir, Mention};
 use offstage_core::pipeline::{refresh as run_refresh, Report};
@@ -117,6 +118,12 @@ fn search(st: St, q: Query) -> Result<Vec<Row>, String> {
 #[tauri::command]
 fn breakdown(st: St, q: Query, depth: usize) -> Result<Vec<Group>, String> {
     with_store(&st, |s| s.breakdown(&q, depth.clamp(1, 6), 300))
+}
+
+/// 絞り込みの選択肢ごとの件数 (その選択肢を選んだら何件になるか)。期間の範囲は画面の手元の時刻で決めて渡す
+#[tauri::command]
+fn facets(st: St, q: Query, periods: Vec<PeriodOpt>) -> Result<Facets, String> {
+    with_store(&st, |s| s.facets(&q, &periods))
 }
 
 #[derive(Serialize)]
@@ -431,7 +438,7 @@ fn main() {
     tauri::Builder::default()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            overview, refresh, search, breakdown, repo_info, exclude_repo, include_repo, detail, scene, dismiss, forget_repo, set_class, clear_class, reveal, open_file
+            overview, refresh, search, breakdown, facets, repo_info, exclude_repo, include_repo, detail, scene, dismiss, forget_repo, set_class, clear_class, reveal, open_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running Offstage");

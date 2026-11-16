@@ -4,6 +4,7 @@
 //! 会話との結び付け (link)・検索 (query)・リポジトリ探し (repos)・取り込みの流れ (pipeline)。
 
 pub mod classify;
+pub mod facets;
 pub mod scan;
 pub mod link;
 pub mod pipeline;

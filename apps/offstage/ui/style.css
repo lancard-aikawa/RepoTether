@@ -338,3 +338,5 @@ tbody tr.group .cnt { margin-left: 8px; color: var(--muted); font-weight: 400; f
   background: var(--accent); color: var(--accent-text); font-weight: 600;
 }
 .btn .badge[hidden] { display: none; }
+/* リポジトリの名前は長いので、欄の幅を抑える (選んだ名前は吹き出しでなく一覧で分かる) */
+#q-repo { max-width: 200px; }

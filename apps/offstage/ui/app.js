@@ -123,7 +123,9 @@ function bucket(sec) {
 }
 /// 期間の選択を、更新時刻の範囲 [since, until) にする
 function period() {
-  const v = $("q-period").value;
+  return periodOf($("q-period").value);
+}
+function periodOf(v) {
   const t0 = todayStart();
   if (v === "today") return { since: t0, until: null };
   if (/^\d+$/.test(v)) return { since: t0 - (Number(v) - 1) * DAY, until: null };
@@ -156,7 +158,9 @@ function query() {
     repo: $("q-repo").value,
     mention: $("q-mention").value.startsWith("kind:") ? "" : $("q-mention").value,
     kinds: $("q-mention").value.startsWith("kind:") ? [$("q-mention").value.slice(5)] : [],
-    ext: $("q-ext").value.trim().replace(/^\./, ""),
+    // 種類: まとまりか、「拡張子」を選んだときだけ打った拡張子
+    kind: $("q-kind").value === "ext" ? "" : $("q-kind").value,
+    ext: $("q-kind").value === "ext" ? $("q-ext").value.trim().replace(/^\./, "") : "",
     ...period(),
     order: viewMode === "time" ? "modified" : "",
     limit: viewMode === "tree" ? TREE_LIMIT : TABLE_LIMIT,
@@ -215,7 +219,8 @@ function markFilters() {
     const el = $(f.dataset.f);
     const on = el.value.trim() !== "" && !el.closest("[hidden]");
     f.classList.toggle("on", on);
-    if (on && f.dataset.f !== "q-from" && f.dataset.f !== "q-to") n++;
+    // 期間の「指定」の日付・種類の「拡張子」の入力は、親の欄と合わせて 1 つと数える
+    if (on && !["q-from", "q-to", "q-ext"].includes(f.dataset.f)) n++;
   });
   if (alertFilter) n++;
   if (folderFilter) n++;
@@ -224,8 +229,41 @@ function markFilters() {
   $("clear-n").textContent = String(n);
 }
 
+/// 一覧 (か表示「区分」) を出してから、選択肢の件数を数える (一覧が出るのを待たせない)
 async function loadRows() {
   markFilters();
+  await loadList();
+  loadFacets();
+}
+
+/// 絞り込みの欄と、件数の欄の名前 (offstage-core の Facets)
+const FACET_SELECTS = { period: "q-period", kind: "q-kind", repo: "q-repo", class: "q-class", mention: "q-mention", state: "q-state" };
+const PERIOD_KEYS = ["today", "7", "30", "90", "365", "older"];
+let facetSeq = 0;
+/// 選択肢に「選んだら何件になるか」を添え、0 件のものは選べなくする (選んでいるものは除く)
+async function loadFacets() {
+  const seq = ++facetSeq;
+  let f;
+  try {
+    f = await invoke("facets", { q: query(), periods: PERIOD_KEYS.map((key) => ({ key, ...periodOf(key) })) });
+  } catch {
+    return;
+  }
+  if (seq !== facetSeq) return; // 数えている間に条件が変わった
+  for (const [dim, id] of Object.entries(FACET_SELECTS)) {
+    const counts = f[dim] || {};
+    for (const o of $(id).options) {
+      if (o.dataset.label == null) o.dataset.label = o.textContent;
+      // 指定の期間・拡張子・会話の出方は数えない
+      if (o.value === "range" || o.value === "ext" || o.value.startsWith("kind:")) continue;
+      const n = counts[o.value] || 0;
+      o.textContent = `${o.dataset.label}  ${n.toLocaleString()}`;
+      o.disabled = n === 0 && !o.selected;
+    }
+  }
+}
+
+async function loadList() {
   renderFolderChip();
   if (viewMode === "sum") return loadBreakdown();
   try {
@@ -879,10 +917,17 @@ $("q-period").addEventListener("change", () => {
   $("q-range").hidden = $("q-period").value !== "range";
   loadRows();
 });
+$("q-kind").addEventListener("change", () => {
+  const ext = $("q-kind").value === "ext";
+  $("q-ext-box").hidden = !ext;
+  if (ext) $("q-ext").focus();
+  loadRows();
+});
 $("clear").onclick = () => {
   for (const id of ["q-text", "q-ext", "q-from", "q-to"]) $(id).value = "";
-  for (const id of ["q-class", "q-state", "q-mention", "q-repo", "q-period"]) $(id).value = "";
+  for (const id of ["q-class", "q-state", "q-mention", "q-repo", "q-period", "q-kind"]) $(id).value = "";
   $("q-range").hidden = true;
+  $("q-ext-box").hidden = true;
   alertFilter = "";
   const back = folderFilter?.from;
   folderFilter = null;
