@@ -257,7 +257,7 @@ async function loadFacets() {
       // 指定の期間・拡張子・会話の出方は数えない
       if (o.value === "range" || o.value === "ext" || o.value.startsWith("kind:")) continue;
       const n = counts[o.value] || 0;
-      o.textContent = `${o.dataset.label}  ${n.toLocaleString()}`;
+      o.textContent = `${o.dataset.label} (${n.toLocaleString()})`;
       o.disabled = n === 0 && !o.selected;
     }
   }
