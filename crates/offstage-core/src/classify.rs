@@ -13,6 +13,11 @@
 //! 名前で分からないものは、洗い出しのとき ([`crate::scan`]) に目印のファイル (`pyvenv.cfg` など) と
 //! ファイルの数 (多すぎれば道具のデータの 1 件に畳む) で見分ける
 
+/// 分け方の版。規則を変えたら上げる。記録にはこれを残し、より新しい版で書かれた記録は古い Offstage では取り込まない
+/// (RepoTether に同梱した古い offstage.exe が、裏の取り込みで分け方を古いものに戻さないように)。
+/// 1: Offstage 0.1.2 まで (記録に版は書いていない) / 2: データの区分・置き場所での判定・数で畳む
+pub const RULES_VERSION: i64 = 2;
+
 /// 分類の結果
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Class {

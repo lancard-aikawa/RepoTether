@@ -142,6 +142,8 @@ impl Store {
              );
              CREATE INDEX IF NOT EXISTS files_sha ON files(sha256);
              CREATE INDEX IF NOT EXISTS files_state ON files(state);
+             -- 記録そのものの情報 (rules: 書いたときの分け方の版。classify::RULES_VERSION)
+             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS repos (
                repo TEXT PRIMARY KEY,
                last_scan INTEGER NOT NULL,
@@ -352,6 +354,25 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         Ok(n > 0)
+    }
+
+    /// 記録を書いた分け方の版 (書いたことが無ければ 0)
+    pub fn rules_version(&self) -> Result<i64, String> {
+        self.conn
+            .query_row("SELECT value FROM meta WHERE key = 'rules'", [], |r| r.get(0))
+            .optional()
+            .map(|v| v.unwrap_or(0))
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn set_rules_version(&self, v: i64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO meta (key, value) VALUES ('rules', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![v],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     /// フォルダごと見当たらないリポジトリを、記録から外す (ファイル・資料・会話の場面・付け替え)。

@@ -1,5 +1,6 @@
 //! 取り込みの流れ: リポジトリを探す → 洗い出して記録する → git の資料の一覧 → 会話と結び付ける。
 
+use crate::classify::RULES_VERSION;
 use crate::link::{LinkStats, Known};
 use crate::scan::{scan_repo_with, tracked_docs};
 use crate::store::{Changes, Store};
@@ -43,6 +44,13 @@ impl Report {
 /// 取り込む。`projects_dir` が None なら会話との結び付けはしない
 pub fn refresh(store: &mut Store, repos: &[PathBuf], projects_dir: Option<&Path>) -> Result<Report, String> {
     let t0 = Instant::now();
+    let written = store.rules_version()?;
+    if written > RULES_VERSION {
+        return Err(format!(
+            "この記録は新しい版の Offstage が書いたものです (分け方 {written}、この Offstage は {RULES_VERSION})。\
+             分け方を古いものに戻さないよう、取り込みません。Offstage (RepoTether) を新しい版に入れ替えてください"
+        ));
+    }
     let mut rep = Report { repos: repos.len(), ..Default::default() };
     // git を呼ぶ部分 (無視されたものと資料の一覧) は、リポジトリごとに並べて回す。記録への書き込みは後でまとめて
     let jobs: Vec<(PathBuf, Vec<(String, crate::classify::Class)>)> = repos
@@ -64,6 +72,7 @@ pub fn refresh(store: &mut Store, repos: &[PathBuf], projects_dir: Option<&Path>
         }
     }
     let changes = store.apply_run(&scans)?;
+    store.set_rules_version(RULES_VERSION)?;
     for (root, d) in &docs {
         store.set_docs(root, d)?;
     }
@@ -107,6 +116,22 @@ fn parallel<T: Sync, R: Send>(items: &[T], workers: usize, f: impl Fn(&T) -> R +
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn refuses_a_store_written_by_newer_rules() {
+        let t = std::env::temp_dir().join(format!("offstage-rules-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let mut s = crate::store::Store::open(&t.join("index.sqlite")).unwrap();
+        assert_eq!(s.rules_version().unwrap(), 0);
+        super::refresh(&mut s, &[], None).unwrap();
+        assert_eq!(s.rules_version().unwrap(), super::RULES_VERSION);
+        s.set_rules_version(super::RULES_VERSION + 1).unwrap();
+        let e = super::refresh(&mut s, &[], None).unwrap_err();
+        assert!(e.contains("新しい版"), "{e}");
+        assert_eq!(s.rules_version().unwrap(), super::RULES_VERSION + 1);
+        drop(s);
+        let _ = std::fs::remove_dir_all(&t);
+    }
+
     #[test]
     fn parallel_keeps_order() {
         let items: Vec<u32> = (0..50).collect();
