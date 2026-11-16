@@ -14,7 +14,7 @@ use std::time::UNIX_EPOCH;
 pub struct Query {
     /// パスに含む文字 (大文字小文字は区別しない)
     pub text: String,
-    /// 区分 (generated / secret / tooldata / personal / doc)
+    /// 区分 (generated / secret / data / tooldata / personal / doc)
     pub classes: Vec<String>,
     /// 状態 (present / missing / moved / dismissed)
     pub states: Vec<String>,
@@ -25,6 +25,14 @@ pub struct Query {
     pub ext: String,
     /// 会話での出方 (read / attached / grep / edit / bash / tool / write / result / text)。どれかで出たもの
     pub kinds: Vec<String>,
+    /// 更新時刻がこの時刻 (UNIX 秒) 以後のもの
+    pub since: Option<i64>,
+    /// 更新時刻がこの時刻 (UNIX 秒) より前のもの
+    pub until: Option<i64>,
+    /// 並び。"" (印のあるもの → 会話に出た新しいもの) / "modified" (更新の新しい順。時刻の無いものは最後)
+    pub order: String,
+    /// フォルダごと見当たらないリポジトリのもの: None (絞らない) / Some(false) (除く) / Some(true) (それだけ)
+    pub gone: Option<bool>,
     pub limit: usize,
 }
 
@@ -48,6 +56,8 @@ pub struct Row {
     pub mentions: i64,
     pub content_mentions: i64,
     pub last_mention: Option<String>,
+    /// リポジトリのフォルダごと見当たらない
+    pub repo_gone: bool,
 }
 
 /// 印の数
@@ -85,8 +95,9 @@ fn union_sql() -> String {
            SELECT repo, rel_path, 'doc', 'present', 0, size, mtime_ns, NULL, NULL, NULL FROM docs
          )
          SELECT u.repo, u.rel_path, u.class, u.state, u.is_dir, u.size, u.mtime_ns, u.folded, u.moved_to,
-                u.state_since, COALESCE(m.n, 0), COALESCE(m.c, 0), m.last
-         FROM u LEFT JOIN m ON m.repo = u.repo AND m.rel_path = u.rel_path"
+                u.state_since, COALESCE(m.n, 0), COALESCE(m.c, 0), m.last, (g.gone_since IS NOT NULL)
+         FROM u LEFT JOIN m ON m.repo = u.repo AND m.rel_path = u.rel_path
+                LEFT JOIN repos g ON g.repo = u.repo"
     )
 }
 
@@ -106,6 +117,7 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Row> {
         mentions: r.get(10)?,
         content_mentions: r.get(11)?,
         last_mention: r.get(12)?,
+        repo_gone: r.get::<_, Option<bool>>(13)?.unwrap_or(false),
     })
 }
 
@@ -151,11 +163,27 @@ impl Store {
             wh.push("lower(u.rel_path) LIKE ?".into());
             args.push(format!("%.{}", q.ext.to_lowercase()));
         }
+        match q.gone {
+            Some(true) => wh.push("g.gone_since IS NOT NULL".into()),
+            Some(false) => wh.push("g.gone_since IS NULL".into()),
+            None => {}
+        }
+        // 時刻は数で埋め込む (i64 なので文字は混ざらない)。mtime_ns はナノ秒
+        if let Some(s) = q.since {
+            wh.push(format!("u.mtime_ns >= {}", s.saturating_mul(1_000_000_000)));
+        }
+        if let Some(s) = q.until {
+            wh.push(format!("u.mtime_ns < {}", s.saturating_mul(1_000_000_000)));
+        }
         let limit = if q.limit == 0 { 500 } else { q.limit.min(5000) };
+        let order = match q.order.as_str() {
+            "modified" => "(u.mtime_ns IS NULL), u.mtime_ns DESC, u.repo, u.rel_path",
+            _ => "(u.state IN ('missing','moved')) DESC,
+                  (u.class = 'secret' AND COALESCE(m.c, 0) > 0) DESC,
+                  m.last DESC, u.repo, u.rel_path",
+        };
         let sql = format!(
-            "{} {} ORDER BY (u.state IN ('missing','moved')) DESC,
-                       (u.class = 'secret' AND COALESCE(m.c, 0) > 0) DESC,
-                       m.last DESC, u.repo, u.rel_path LIMIT {limit}",
+            "{} {} ORDER BY {order} LIMIT {limit}",
             union_sql(),
             if wh.is_empty() { String::new() } else { format!("WHERE {}", wh.join(" AND ")) }
         );
@@ -344,6 +372,37 @@ mod tests {
         assert_eq!((all[0].rel_path.as_str(), all[0].state.as_str()), ("sandbox/memo.md", "missing"));
         let a = s.alerts().unwrap();
         assert_eq!((a.missing, a.files, a.docs, a.repos), (1, 3, 1, 1));
+        drop(s);
+        let _ = fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn filter_and_order_by_modified_time() {
+        let t = std::env::temp_dir().join(format!("offstage-period-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&t);
+        let s = Store::open(&t.join("index.sqlite")).unwrap();
+        const NS: i64 = 1_000_000_000;
+        for (p, mt) in [("old.md", Some(100 * NS)), ("mid.md", Some(200 * NS)), ("new.md", Some(300 * NS)), ("none.md", None)] {
+            s.conn
+                .execute("INSERT INTO docs (repo, rel_path, size, mtime_ns) VALUES ('R', ?1, 0, ?2)", params![p, mt])
+                .unwrap();
+        }
+        let names = |q: Query| -> Vec<String> { s.search(&q).unwrap().into_iter().map(|r| r.rel_path).collect() };
+        let by_mod = |since, until| Query { since, until, order: "modified".into(), ..Default::default() };
+        assert_eq!(names(by_mod(None, None)), vec!["new.md", "mid.md", "old.md", "none.md"]);
+        assert_eq!(names(by_mod(Some(200), None)), vec!["new.md", "mid.md"]);
+        assert_eq!(names(by_mod(None, Some(200))), vec!["old.md"]);
+        assert_eq!(names(by_mod(Some(150), Some(300))), vec!["mid.md"]);
+
+        // フォルダごと見当たらないリポジトリのものは、ふだんは除き、「不明」でだけ出す
+        s.conn.execute("INSERT INTO docs (repo, rel_path, size, mtime_ns) VALUES ('G', 'lost.md', 0, NULL)", []).unwrap();
+        s.conn.execute("INSERT INTO repos (repo, last_scan, gone_since) VALUES ('G', 1, 2), ('R', 1, NULL)", []).unwrap();
+        let gone = |g| s.search(&Query { gone: g, ..Default::default() }).unwrap();
+        assert_eq!(gone(None).len(), 5);
+        assert_eq!(gone(Some(false)).len(), 4);
+        let only = gone(Some(true));
+        assert_eq!((only.len(), only[0].rel_path.as_str(), only[0].repo_gone), (1, "lost.md", true));
+        assert!(!gone(Some(false))[0].repo_gone);
         drop(s);
         let _ = fs::remove_dir_all(&t);
     }

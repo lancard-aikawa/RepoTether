@@ -20,21 +20,21 @@ fn main() {
         std::process::exit(2);
     };
 
-    const CLASSES: [Class; 4] = [Class::Generated, Class::ToolData, Class::Personal, Class::Secret];
-    let row = |name: &str, c: &[usize; 4]| {
-        println!("{name:<28} {:>9} {:>8} {:>8} {:>6}", c[0], c[1], c[2], c[3]);
+    const CLASSES: [Class; 5] = [Class::Generated, Class::ToolData, Class::Data, Class::Personal, Class::Secret];
+    let row = |name: &str, c: &[usize; 5]| {
+        println!("{name:<28} {:>9} {:>8} {:>6} {:>8} {:>6}", c[0], c[1], c[2], c[3], c[4]);
     };
-    println!("{:<28} {:>9} {:>8} {:>8} {:>6}", "repo", "generated", "tooldata", "personal", "secret");
-    let mut total = [0usize; 4];
+    println!("{:<28} {:>9} {:>8} {:>6} {:>8} {:>6}", "repo", "generated", "tooldata", "data", "personal", "secret");
+    let mut total = [0usize; 5];
     for repo in child_repos(&root) {
         let name = repo.file_name().unwrap().to_string_lossy().into_owned();
         match scan_repo(&repo) {
             Ok(s) => {
                 let c = CLASSES.map(|k| s.count(k));
-                for i in 0..4 {
+                for i in 0..5 {
                     total[i] += c[i];
                 }
-                if c[1] + c[2] + c[3] == 0 && !list {
+                if c[1..].iter().sum::<usize>() == 0 && !list {
                     continue;
                 }
                 row(&name, &c);

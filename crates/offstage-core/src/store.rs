@@ -354,6 +354,32 @@ impl Store {
         Ok(n > 0)
     }
 
+    /// フォルダごと見当たらないリポジトリを、記録から外す (ファイル・資料・会話の場面・付け替え)。
+    /// 外したファイルと資料の件数を返す。見当たらない印の無いリポジトリと、フォルダが今あるリポジトリは外さない
+    pub fn forget_repo(&mut self, repo: &str) -> Result<usize, String> {
+        let gone: Option<Option<i64>> = self
+            .conn
+            .query_row("SELECT gone_since FROM repos WHERE repo = ?1", params![repo], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if !matches!(gone, Some(Some(_))) {
+            return Err("フォルダごと見当たらないリポジトリだけを外せます".into());
+        }
+        if Path::new(repo).exists() {
+            return Err("フォルダがあります。次の取り込みで見当たらない印が外れます".into());
+        }
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        let mut n = 0;
+        for table in ["files", "docs"] {
+            n += tx.execute(&format!("DELETE FROM {table} WHERE repo = ?1"), params![repo]).map_err(|e| e.to_string())?;
+        }
+        for table in ["mentions", "overrides", "repos"] {
+            tx.execute(&format!("DELETE FROM {table} WHERE repo = ?1"), params![repo]).map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(n)
+    }
+
     /// 記録の状態 (試験と画面用)
     pub fn state_of(&self, repo: &str, rel_path: &str) -> Result<Option<String>, String> {
         self.conn
@@ -493,6 +519,17 @@ mod tests {
         assert!(c.missing.is_empty());
         assert_eq!(c.repos_gone, vec![b.to_string_lossy().into_owned()]);
         assert_eq!(s.state_of(&b.to_string_lossy(), "sandbox/y.md").unwrap().as_deref(), Some(PRESENT));
+
+        // 見当たらないリポジトリは記録から外せる。あるリポジトリは外せない
+        let (ar, br) = (a.to_string_lossy().into_owned(), b.to_string_lossy().into_owned());
+        assert!(s.forget_repo(&ar).is_err());
+        assert!(s.forget_repo(&br).unwrap() >= 1);
+        assert_eq!(s.state_of(&br, "sandbox/y.md").unwrap(), None);
+        assert_eq!(s.repos().unwrap().iter().map(|(r, _)| r.clone()).collect::<Vec<_>>(), vec![ar.clone()]);
+        // 次の取り込みでも戻ってこない
+        let c = run(&mut s, &[&a], 400);
+        assert!(c.repos_gone.is_empty());
+        assert_eq!(s.state_of(&ar, "sandbox/x.md").unwrap().as_deref(), Some(PRESENT));
     }
 
     #[test]

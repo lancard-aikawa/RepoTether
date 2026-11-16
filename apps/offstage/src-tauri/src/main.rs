@@ -30,7 +30,7 @@ struct Settings {
     select: Option<String>,
     /// 見本の画面を撮るとき: 選んだ行の最初の場面を開く (OFFSTAGE_OPEN_SCENE=1)
     open_scene: bool,
-    /// 見本の画面を撮るとき: 表示 (OFFSTAGE_VIEW=table / tree)
+    /// 見本の画面を撮るとき: 表示 (OFFSTAGE_VIEW=table / tree / time)
     view: Option<String>,
     /// 起動時に絞るリポジトリ (RepoTether の行から `--repo <フォルダ>` で開いたとき)
     initial_repo: Option<String>,
@@ -199,6 +199,16 @@ fn dismiss(st: St, repo: String, rel_path: String) -> Result<bool, String> {
     with_store(&st, |s| {
         let n = s.dismiss(&repo, &rel_path)?;
         let _ = s.write_summary(); // RepoTether の印を数え直す
+        Ok(n)
+    })
+}
+
+/// フォルダごと見当たらないリポジトリを、記録から外す (画面の「不明」の「了解」)
+#[tauri::command]
+fn forget_repo(st: St, repo: String) -> Result<usize, String> {
+    with_store(&st, |s| {
+        let n = s.forget_repo(&repo)?;
+        let _ = s.write_summary();
         Ok(n)
     })
 }
@@ -374,7 +384,7 @@ fn main() {
     tauri::Builder::default()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            overview, refresh, search, detail, scene, dismiss, set_class, clear_class, reveal, open_file
+            overview, refresh, search, detail, scene, dismiss, forget_repo, set_class, clear_class, reveal, open_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running Offstage");

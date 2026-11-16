@@ -29,6 +29,7 @@
         <option value="">すべて（生成以外）</option>
         <option value="personal">個人</option>
         <option value="secret">機密</option>
+        <option value="data">データ</option>
         <option value="tooldata">道具</option>
         <option value="doc">資料</option>
         <option value="generated">生成</option>
@@ -68,6 +69,22 @@
     <label class="field narrow"><span>種類</span>
       <input id="q-ext" type="text" placeholder="md" autocomplete="off" spellcheck="false">
     </label>
+    <label class="field"><span>期間</span>
+      <select id="q-period" title="ファイルの更新日時で絞る">
+        <option value="">すべて</option>
+        <option value="today">今日</option>
+        <option value="7">7 日</option>
+        <option value="30">30 日</option>
+        <option value="90">90 日</option>
+        <option value="365">1 年</option>
+        <option value="older">1 年より前</option>
+        <option value="range">指定</option>
+      </select>
+    </label>
+    <span id="q-range" class="range" hidden>
+      <label class="field"><span>から</span><input id="q-from" type="date" title="この日を含む"></label>
+      <label class="field"><span>まで</span><input id="q-to" type="date" title="この日を含む"></label>
+    </span>
     <button id="clear" class="btn" type="button" title="絞り込みを全部外す">
       <span class="ico" data-ico="clear"></span><span class="label">解除</span>
     </button>
@@ -80,6 +97,7 @@
         <span class="seg" role="group" aria-label="表示">
           <button id="view-table" type="button" aria-pressed="true" title="パスを 1 行ずつ並べる">一覧</button>
           <button id="view-tree" type="button" aria-pressed="false" title="リポジトリとフォルダの木で見る">ツリー</button>
+          <button id="view-time" type="button" aria-pressed="false" title="更新の新しい順に、今日・昨日・月ごとに区切って並べる">時系列</button>
         </span>
         <span id="tree-tools" class="tools" hidden>
           <button id="tree-expand" class="btn chip" type="button" title="フォルダを全部開く">展開</button>

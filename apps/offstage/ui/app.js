@@ -4,7 +4,7 @@
 const invoke = window.__TAURI__.core.invoke;
 const $ = (id) => document.getElementById(id);
 
-const CLASS = { personal: "個人", secret: "機密", tooldata: "道具", doc: "資料", generated: "生成" };
+const CLASS = { personal: "個人", secret: "機密", data: "データ", tooldata: "道具", doc: "資料", generated: "生成" };
 const STATE = { present: "あり", missing: "消失", moved: "移動", dismissed: "了解" };
 // 出方。content: 中身が送られた (かもしれない) もの
 const KIND = {
@@ -17,6 +17,14 @@ const KIND = {
   write: ["作成", false, "Claude が Write で書いた"],
   result: ["結果", false, "道具の結果に名前が出た"],
   text: ["本文", false, "本文に名前が出た"],
+};
+/// 1 件に畳んだ理由 (offstage-core の scan.rs)
+const RULE = {
+  bulk: "ファイルが 1000 件を超えるので 1 件に畳んだ",
+  "marker:venv": "pyvenv.cfg がある (Python の venv)",
+  "marker:cache": "CACHEDIR.TAG がある (キャッシュ)",
+  "marker:pyinstaller": "base_library.zip がある (PyInstaller の同梱物)",
+  "profile:chromium": "Local State がある (ブラウザの利用者データ)",
 };
 const ICONS = {
   refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/></svg>',
@@ -62,6 +70,62 @@ function date(sec) {
 function isoDate(s) {
   return s ? date(Date.parse(s) / 1000) : "";
 }
+const DAY = 86400;
+/// 今日の 0 時 (UNIX 秒、手元の時刻で)
+function todayStart() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime() / 1000;
+}
+/// 何日前か (暦の日で数える。今日 = 0、昨日 = 1)
+function daysAgo(sec) {
+  const d = new Date(sec * 1000);
+  d.setHours(0, 0, 0, 0);
+  return Math.round((todayStart() - d.getTime() / 1000) / DAY);
+}
+/// 今からどれだけ前か: たった今 / 5 分前 / 3 時間前 / 昨日 / 12 日前 / 3 か月前 / 2 年前
+function ago(sec) {
+  if (!sec) return "";
+  const diff = Date.now() / 1000 - sec;
+  if (diff < -60) return date(sec); // 時計がずれているときは、そのまま
+  if (diff < 60) return "たった今";
+  const days = daysAgo(sec);
+  if (days === 0) return diff < 3600 ? `${Math.floor(diff / 60)} 分前` : `${Math.floor(diff / 3600)} 時間前`;
+  if (days === 1) return "昨日";
+  if (days < 60) return `${days} 日前`;
+  if (days < 365) return `${Math.floor(days / 30)} か月前`;
+  return `${Math.floor(days / 365)} 年前`;
+}
+/// 絶対の日時と、今からどれだけ前か
+function when(sec) {
+  return sec ? `${date(sec)}（${ago(sec)}）` : "";
+}
+/// 時系列の区切り
+function bucket(sec) {
+  if (!sec) return "更新日時なし";
+  const days = daysAgo(sec);
+  if (days <= 0) return "今日";
+  if (days === 1) return "昨日";
+  if (days < 7) return "7 日以内";
+  if (days < 30) return "30 日以内";
+  const d = new Date(sec * 1000);
+  return `${d.getFullYear()} 年 ${d.getMonth() + 1} 月`;
+}
+/// 期間の選択を、更新時刻の範囲 [since, until) にする
+function period() {
+  const v = $("q-period").value;
+  const t0 = todayStart();
+  if (v === "today") return { since: t0, until: null };
+  if (/^\d+$/.test(v)) return { since: t0 - (Number(v) - 1) * DAY, until: null };
+  if (v === "older") return { since: null, until: t0 - 364 * DAY };
+  if (v === "range") {
+    const day = (s) => (s ? new Date(`${s}T00:00:00`).getTime() / 1000 : null);
+    const from = day($("q-from").value);
+    const to = day($("q-to").value);
+    return { since: from, until: to == null ? null : to + DAY };
+  }
+  return { since: null, until: null };
+}
 
 let rows = [];
 let selected = null; // {repo, relPath}
@@ -73,16 +137,20 @@ function query() {
   const cls = $("q-class").value;
   const q = {
     text: $("q-text").value,
-    classes: cls ? [cls] : ["personal", "secret", "tooldata", "doc"],
+    classes: cls ? [cls] : ["personal", "secret", "data", "tooldata", "doc"],
     states: $("q-state").value ? [$("q-state").value] : [],
     repo: $("q-repo").value,
     mention: $("q-mention").value.startsWith("kind:") ? "" : $("q-mention").value,
     kinds: $("q-mention").value.startsWith("kind:") ? [$("q-mention").value.slice(5)] : [],
     ext: $("q-ext").value.trim().replace(/^\./, ""),
+    ...period(),
+    order: viewMode === "time" ? "modified" : "",
     limit: viewMode === "tree" ? TREE_LIMIT : TABLE_LIMIT,
   };
   if (alertFilter === "missing") q.states = ["missing"];
   if (alertFilter === "moved") q.states = ["moved"];
+  // フォルダごと見当たらないリポジトリのものは、ふだんは出さず「不明」でだけ出す
+  q.gone = alertFilter === "gone";
   if (alertFilter === "sent") {
     q.classes = ["secret"];
     q.mention = "content";
@@ -103,7 +171,7 @@ async function loadOverview() {
     .map(([key, name, n, tip, heat]) => {
       const lit = n > 0 ? heat : "";
       const on = alertFilter === key ? " on" : "";
-      const disabled = n > 0 && key !== "gone" ? "" : " disabled";
+      const disabled = n > 0 ? "" : " disabled";
       return `<button type="button" class="card ${lit}${on}" data-alert="${key}" title="${esc(tip)}"${disabled}>
         <span class="name">${ico(key)}${esc(name)}</span><span class="n">${n ?? "-"}</span><span class="sub">${esc(tip)}</span></button>`;
     })
@@ -144,16 +212,23 @@ const TREE_LIMIT = 5000;
 const TREE_AUTO_EXPAND = 200;
 let viewMode = "table";
 try {
-  if (localStorage.getItem("offstage.view") === "tree") viewMode = "tree";
+  const v = localStorage.getItem("offstage.view");
+  if (v === "tree" || v === "time") viewMode = v;
 } catch {}
 /// ツリーで開いているフォルダ (リポジトリ|パス)
 let expanded = new Set();
 
+/// 状態の札。リポジトリのフォルダごと見当たらないものは、記録の状態に関わらず「不明」
+function stateTag(r) {
+  return r.repoGone ? tag("missing", "不明", "リポジトリのフォルダごと見当たらない") : tag(r.state, STATE[r.state] || r.state);
+}
+
 function talkTag(r) {
+  const last = r.lastMention ? `\n最後に出たのは ${when(Date.parse(r.lastMention) / 1000)}` : "";
   return r.mentions
     ? r.contentMentions
-      ? tag("content", `中身 ${r.contentMentions}`, `会話に ${r.mentions} 回、うち中身が送られたのが ${r.contentMentions} 回`)
-      : tag("", `名前 ${r.mentions}`, `会話に名前が ${r.mentions} 回出た`)
+      ? tag("content", `中身 ${r.contentMentions}`, `会話に ${r.mentions} 回、うち中身が送られたのが ${r.contentMentions} 回${last}`)
+      : tag("", `名前 ${r.mentions}`, `会話に名前が ${r.mentions} 回出た${last}`)
     : "";
 }
 
@@ -166,24 +241,34 @@ function renderList() {
   $("table").hidden = tree;
   $("tree").hidden = !tree;
   $("tree-tools").hidden = !tree;
-  $("view-table").setAttribute("aria-pressed", String(!tree));
-  $("view-tree").setAttribute("aria-pressed", String(tree));
+  for (const m of ["table", "tree", "time"]) $(`view-${m}`).setAttribute("aria-pressed", String(viewMode === m));
   if (tree) renderTree();
   else renderTable();
 }
 
+/// 一覧の表。時系列では、更新の新しい順に今日・昨日・…の見出しで区切る (見出しは押せない)
 function renderTable() {
+  const timeline = viewMode === "time";
+  const counts = {};
+  if (timeline) for (const r of rows) counts[bucket(r.modified)] = (counts[bucket(r.modified)] || 0) + 1;
+  let prev = null;
   $("rows").innerHTML = rows
-    .map(
-      (r, i) => `<tr data-i="${i}" tabindex="0" class="${isSel(r) ? "sel" : ""}">
-        <td>${tag(r.state, STATE[r.state] || r.state)}</td>
+    .map((r, i) => {
+      let head = "";
+      if (timeline) {
+        const b = bucket(r.modified);
+        if (b !== prev) head = `<tr class="group"><th colspan="6">${esc(b)}<span class="cnt">${counts[b]} 件</span></th></tr>`;
+        prev = b;
+      }
+      return `${head}<tr data-i="${i}" tabindex="0" class="${isSel(r) ? "sel" : ""}">
+        <td>${stateTag(r)}</td>
         <td>${tag(r.class, CLASS[r.class] || r.class)}</td>
         <td class="path"><span class="repo" title="${esc(r.repo)}">${esc(base(r.repo))}</span>${esc(r.relPath)}${r.isDir ? "/" : ""}</td>
         <td class="num">${r.isDir ? "" : esc(size(r.size))}</td>
-        <td class="when">${esc(date(r.modified))}</td>
+        <td class="when${r.modified && daysAgo(r.modified) < 7 ? " recent" : ""}" title="${esc(date(r.modified))}">${esc(ago(r.modified))}</td>
         <td class="num">${talkTag(r)}</td>
-      </tr>`,
-    )
+      </tr>`;
+    })
     .join("");
 }
 
@@ -232,10 +317,13 @@ function renderTree() {
       n.moved ? tag("moved", `移動 ${n.moved}`) : "",
       n.content ? tag("content", `中身 ${n.content}`, "中身が会話に送られたファイルの数") : "",
     ].join("");
+    // フォルダは、リポジトリ名からの道筋を薄く添える (流して途中から見ても、どのリポジトリのどこか分かるように)
+    const [repo, path] = [n.key.slice(0, n.key.indexOf("|")), n.key.slice(n.key.indexOf("|") + 1)];
+    const trail = isRepo ? "" : [base(repo), ...path.split("/").slice(0, -1)].join("/") + "/";
     html.push(`<div class="node folder${isRepo ? " repo" : ""}" role="treeitem" aria-expanded="${open}" tabindex="0"
-      data-key="${esc(n.key)}" style="--d:${depth}" title="${esc(isRepo ? n.key.slice(0, -1) : n.name)}（${open ? "押すと閉じる" : "押すと開く"}）">
+      data-key="${esc(n.key)}" style="--d:${depth}" title="${esc(isRepo ? repo : `${base(repo)}/${path}/`)}（${open ? "押すと閉じる" : "押すと開く"}）">
       <span class="chev">${open ? "▾" : "▸"}</span><span class="ico">${ICONS[isRepo ? "repo" : "open"]}</span>
-      <span class="name">${esc(n.name)}${isRepo ? "" : "/"}</span><span class="cnt">${n.n}</span><span class="marks">${marks}</span></div>`);
+      ${trail ? `<span class="trail">${esc(trail)}</span>` : ""}<span class="name">${esc(n.name)}${isRepo ? "" : "/"}</span><span class="cnt">${n.n}</span><span class="marks">${marks}</span></div>`);
     if (!open) return;
     [...n.dirs.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach((c) => folder(c, depth + 1, false));
     n.files
@@ -244,7 +332,7 @@ function renderTree() {
       .forEach((i) => {
         const r = rows[i];
         html.push(`<div class="node file${isSel(r) ? " sel" : ""}" role="treeitem" tabindex="0" data-i="${i}" style="--d:${depth + 1}">
-          <span class="chev"></span>${r.state !== "present" ? tag(r.state, STATE[r.state] || r.state) : ""}${tag(r.class, CLASS[r.class] || r.class)}
+          <span class="chev"></span>${r.state !== "present" || r.repoGone ? stateTag(r) : ""}${tag(r.class, CLASS[r.class] || r.class)}
           <span class="name">${esc(base(r.relPath))}${r.isDir ? "/" : ""}</span>
           <span class="size">${r.isDir ? "" : esc(size(r.size))}</span>${talkTag(r)}</div>`);
       });
@@ -263,6 +351,7 @@ function setView(mode) {
 
 $("view-table").onclick = () => setView("table");
 $("view-tree").onclick = () => setView("tree");
+$("view-time").onclick = () => setView("time");
 $("tree-expand").onclick = () => {
   expanded = new Set(folderKeys());
   renderTree();
@@ -313,15 +402,16 @@ async function showDetail(repo, relPath) {
   const ov = d.overrideOf;
   box.innerHTML = `
     <h2>${esc(r.relPath)}${r.isDir ? "/" : ""}</h2>
-    <div class="tags">${tag(r.state, STATE[r.state] || r.state)}${tag(r.class, CLASS[r.class] || r.class)}${r.folded ? tag("", "1 件に畳んだフォルダ") : ""}</div>
+    <div class="tags">${stateTag(r)}${tag(r.class, CLASS[r.class] || r.class)}${r.folded ? tag("", "1 件に畳んだフォルダ") : ""}</div>
     <dl>
       <dt>リポジトリ</dt><dd>${esc(r.repo)}</dd>
       <dt>場所</dt><dd>${esc(d.absPath)}${d.exists ? "" : "（今は無い）"}</dd>
       ${r.isDir ? "" : `<dt>大きさ</dt><dd>${esc(size(r.size))}</dd>`}
-      <dt>更新</dt><dd>${esc(date(r.modified))}</dd>
-      ${r.stateSince && r.state !== "present" ? `<dt>${esc(STATE[r.state])}</dt><dd>${esc(date(r.stateSince))} に気づいた</dd>` : ""}
+      <dt>更新</dt><dd>${esc(when(r.modified) || "不明")}</dd>
+      ${r.lastMention ? `<dt>最後の会話</dt><dd>${esc(when(Date.parse(r.lastMention) / 1000))}</dd>` : ""}
+      ${r.stateSince && r.state !== "present" ? `<dt>${esc(STATE[r.state])}</dt><dd>${esc(when(r.stateSince))} に気づいた</dd>` : ""}
       ${r.movedTo ? `<dt>移動先</dt><dd>${esc(r.movedTo)}</dd>` : ""}
-      ${d.rule ? `<dt>規則</dt><dd>${esc(d.rule)}</dd>` : ""}
+      ${d.rule ? `<dt>規則</dt><dd>${esc(RULE[d.rule] || d.rule)}</dd>` : ""}
       ${ov ? `<dt>上書き</dt><dd>${esc(ov[0])} → ${esc(CLASS[ov[1]] || ov[1])}</dd>` : ""}
     </dl>
     <div class="actions">
@@ -339,11 +429,20 @@ async function showDetail(repo, relPath) {
     </div>
     ${d.exists && !d.openable ? `<p class="note">開くと実行される種類なので、「開く」は使えません。中を見るときは「フォルダ」から。</p>` : ""}
     ${
+      r.repoGone
+        ? `<h3>不明</h3>
+    <p class="note">リポジトリのフォルダごと見当たりません（${esc(r.repo)}）。消した・動かしたのなら、「了解」でこのリポジトリを記録から外します（中のファイル・資料・会話の場面をまとめて）。</p>
+    <div class="actions">
+      <button type="button" class="btn danger" id="act-forget" title="このリポジトリを記録から外す（2 回押して確定。取り消せません）">${ico("ok")}了解</button>
+    </div>`
+        : ""
+    }
+    ${
       canClass
         ? `<h3>区分</h3>
     <div class="actions">
       <select id="act-target" title="付け替える範囲">${scopes(r.relPath).map((p) => `<option value="${esc(p)}">${esc(p)}${p === r.relPath ? "" : "/"}</option>`).join("")}</select>
-      <select id="act-class" title="付け替える区分">${["personal", "tooldata", "secret", "generated"].map((c) => `<option value="${c}"${c === r.class ? " selected" : ""}>${CLASS[c]}</option>`).join("")}</select>
+      <select id="act-class" title="付け替える区分">${["personal", "data", "tooldata", "secret", "generated"].map((c) => `<option value="${c}"${c === r.class ? " selected" : ""}>${CLASS[c]}</option>`).join("")}</select>
       <button type="button" class="btn" id="act-set" title="選んだ範囲の区分を付け替える（次の取り込みからも効く）">${ico("apply")}変更</button>
       ${ov ? `<button type="button" class="btn danger" id="act-unset" title="付け替えを外し、規則に戻す（次の取り込みで反映）">${ico("undo")}戻す</button>` : ""}
     </div>
@@ -357,6 +456,30 @@ async function showDetail(repo, relPath) {
   $("act-open").onclick = () => invoke("reveal", { repo, relPath }).catch(alertError);
   $("act-launch").onclick = () => invoke("open_file", { repo, relPath }).catch(alertError);
   if ($("act-ok")) $("act-ok").onclick = () => invoke("dismiss", { repo, relPath }).then(reloadAll).catch(alertError);
+  // 不明のリポジトリを外す: 取り消せないので 2 回押して確定
+  if ($("act-forget"))
+    $("act-forget").onclick = async (ev) => {
+      const b = ev.currentTarget;
+      if (!b.dataset.armed) {
+        b.dataset.armed = "1";
+        b.innerHTML = `${ico("ok")}確定`;
+        b.title = "もう一度押すと、このリポジトリを記録から外す";
+        return;
+      }
+      b.disabled = true;
+      try {
+        const n = await invoke("forget_repo", { repo });
+        selected = null;
+        $("detail").innerHTML = `<p class="hint">一覧の行を選ぶと、ここに場所・区分・会話に出た場面が出ます。</p>`;
+        const left = (await invoke("overview")).alerts?.reposGone ?? 0;
+        if (!left && alertFilter === "gone") alertFilter = "";
+        await reloadAll();
+        $("status").textContent = `${base(repo)} を記録から外しました（${n} 件）`;
+      } catch (e) {
+        b.disabled = false;
+        alertError(e);
+      }
+    };
   if ($("act-set"))
     $("act-set").onclick = () =>
       invoke("set_class", { repo, relPrefix: $("act-target").value, class: $("act-class").value }).then(reloadAll).catch(alertError);
@@ -505,7 +628,7 @@ function renderSceneList(scenes, relPath) {
         const k = KIND[s.kind] || [s.kind, false, ""];
         return `<button type="button" class="scene" data-scene="${i}" title="この場面の前後のやり取りを開く">
             <span class="meta">${tag(k[1] ? "content" : "", k[0], k[2])}
-            <span>${esc(isoDate(s.timestamp))}</span>${s.tool ? `<span class="sid">${esc(s.tool)}</span>` : ""}
+            <span title="${esc(isoDate(s.timestamp))}">${esc(s.timestamp ? ago(Date.parse(s.timestamp) / 1000) : "")}</span>${s.tool ? `<span class="sid">${esc(s.tool)}</span>` : ""}
             <span class="go">${ico("talk")}表示</span></span>
             <span class="title">${esc(s.title || "（題なし）")}</span>
             <span class="sid">${esc(s.sessionId)} ・ ${s.lineNo} 行目</span></button>`;
@@ -580,10 +703,15 @@ for (const id of ["q-text", "q-ext"]) $(id).addEventListener("input", () => {
   clearTimeout(timer);
   timer = setTimeout(loadRows, 200);
 });
-for (const id of ["q-class", "q-state", "q-mention", "q-repo"]) $(id).addEventListener("change", loadRows);
+for (const id of ["q-class", "q-state", "q-mention", "q-repo", "q-from", "q-to"]) $(id).addEventListener("change", loadRows);
+$("q-period").addEventListener("change", () => {
+  $("q-range").hidden = $("q-period").value !== "range";
+  loadRows();
+});
 $("clear").onclick = () => {
-  for (const id of ["q-text", "q-ext"]) $(id).value = "";
-  for (const id of ["q-class", "q-state", "q-mention", "q-repo"]) $(id).value = "";
+  for (const id of ["q-text", "q-ext", "q-from", "q-to"]) $(id).value = "";
+  for (const id of ["q-class", "q-state", "q-mention", "q-repo", "q-period"]) $(id).value = "";
+  $("q-range").hidden = true;
   alertFilter = "";
   loadOverview().then(loadRows);
 };
@@ -601,9 +729,9 @@ $("clear").onclick = () => {
       await loadRows();
     }
   }
-  if (s.view === "tree" || s.view === "table") {
+  if (["tree", "table", "time"].includes(s.view) && s.view !== viewMode) {
     viewMode = s.view;
-    renderList();
+    await loadRows();
   }
   if (s.autoRefresh) await $("refresh").onclick();
   if (s.select) {

@@ -16,6 +16,8 @@
   --ok-bg: #e9f5ec;
   --ok: #1f6b35;
   --tag-bg: #eceff4;
+  --data-bg: #f1ebfb;
+  --data: #6a3fb0;
   --focus: #2457c5;
   color-scheme: light;
 }
@@ -38,6 +40,8 @@
     --ok-bg: #18301f;
     --ok: #7fd394;
     --tag-bg: #2a313c;
+    --data-bg: #2d2540;
+    --data: #c7adff;
     --focus: #7aa3f3;
     color-scheme: dark;
   }
@@ -146,6 +150,18 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 td.path { word-break: break-all; }
 td.path .repo { color: var(--muted); margin-right: 6px; }
 td.when { white-space: nowrap; color: var(--muted); font-size: 12px; }
+td.when.recent { color: var(--text); font-weight: 600; }
+/* 時系列の見出し: 押せない (触っても変わらない・指のカーソルにしない) */
+tbody tr.group { cursor: default; }
+tbody tr.group:hover { background: none; }
+tbody tr.group th {
+  position: sticky; top: 27px; z-index: 1;
+  text-align: left; font-size: 13px; padding: 8px 8px 4px; background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+tbody tr.group .cnt { margin-left: 8px; color: var(--muted); font-weight: 400; font-size: 12px; }
+.range { display: flex; gap: 10px; }
+.range[hidden] { display: none; }
 .empty { padding: 24px 16px; color: var(--muted); }
 
 /* --- 押せない札: 平らな四角 (角を丸めない・枠なし・触っても変わらない) --- */
@@ -156,6 +172,7 @@ td.when { white-space: nowrap; color: var(--muted); font-size: 12px; }
 .tag.secret, .tag.missing, .tag.content { background: var(--danger-bg); color: var(--danger); }
 .tag.moved, .tag.tooldata { background: var(--warn-bg); color: var(--warn); }
 .tag.personal, .tag.doc { background: var(--ok-bg); color: var(--ok); }
+.tag.data { background: var(--data-bg); color: var(--data); }
 
 /* --- 詳細 --- */
 .detail {
@@ -262,7 +279,11 @@ td.when { white-space: nowrap; color: var(--muted); font-size: 12px; }
 .node .ico { color: var(--muted); flex: none; }
 .node .name { overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
 .node.folder .name { font-weight: 600; }
-.node.repo { background: var(--bg); }
+/* リポジトリの行は上に貼り付く (流しても、いま見ているリポジトリが分かる。後のリポジトリが来ると入れ替わる) */
+.node.repo { background: var(--bg); position: sticky; top: 0; z-index: 2; }
+/* フォルダの行の、リポジトリ名からの道筋 (薄く。狭いときは道筋のほうから縮める) */
+.node .trail { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; margin-right: -6px; }
+.node.folder .trail + .name { flex: none; }
 .node.repo:hover { background: var(--hover); }
 .node .cnt { color: var(--muted); font-size: 12px; }
 .node .marks { margin-left: auto; display: inline-flex; gap: 4px; }
