@@ -1,6 +1,6 @@
 [package]
 name = "repotether"
-version = "0.18.1"
+version = "0.18.2"
 description = "Repository history, activity and local state across projects"
 authors = ["aikawa"]
 edition = "2021"
