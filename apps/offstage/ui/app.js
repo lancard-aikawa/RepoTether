@@ -41,6 +41,12 @@ const ICONS = {
   undo: '<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg>',
   talk: '<svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/></svg>',
   raw: '<svg viewBox="0 0 24 24"><path d="M8 6l-5 6 5 6M16 6l5 6-5 6"/></svg>',
+  // 絞り込みの欄
+  search: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/></svg>',
+  clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>',
+  file: '<svg viewBox="0 0 24 24"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4"/></svg>',
+  tagi: '<svg viewBox="0 0 24 24"><path d="M3 12V4h8l9 9-8 8z"/><circle cx="7.5" cy="7.5" r="1"/></svg>',
+  state: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>',
 };
 
 function esc(s) {
@@ -202,7 +208,24 @@ async function loadOverview() {
   sel.value = cur;
 }
 
+/// 既定から変えた欄を塗り、「解除」に使っている条件の数を出す (何も絞っていなければ押せない)
+function markFilters() {
+  let n = 0;
+  document.querySelectorAll(".filters [data-f]").forEach((f) => {
+    const el = $(f.dataset.f);
+    const on = el.value.trim() !== "" && !el.closest("[hidden]");
+    f.classList.toggle("on", on);
+    if (on && f.dataset.f !== "q-from" && f.dataset.f !== "q-to") n++;
+  });
+  if (alertFilter) n++;
+  if (folderFilter) n++;
+  $("clear").disabled = n === 0;
+  $("clear-n").hidden = n === 0;
+  $("clear-n").textContent = String(n);
+}
+
 async function loadRows() {
+  markFilters();
   renderFolderChip();
   if (viewMode === "sum") return loadBreakdown();
   try {
@@ -847,6 +870,7 @@ $("rows").addEventListener("keydown", (ev) => {
 
 let timer = null;
 for (const id of ["q-text", "q-ext"]) $(id).addEventListener("input", () => {
+  markFilters();
   clearTimeout(timer);
   timer = setTimeout(loadRows, 200);
 });

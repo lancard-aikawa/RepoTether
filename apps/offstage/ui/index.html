@@ -21,10 +21,36 @@
   <section id="alerts" class="alerts" aria-label="印"></section>
 
   <section class="filters" aria-label="絞り込み">
-    <label class="field grow"><span>検索</span>
-      <input id="q-text" type="search" placeholder="パスの一部（空白で区切ると全部を含むもの）" autocomplete="off">
+    <!-- 並び: 見つける手がかり (検索・いつ・何・どこ) → 区切り → 分け方の条件 (区分・会話・状態)。
+         既定から変えた欄は .on で塗る (どこで絞っているかを一目で分かるように) -->
+    <label class="field grow" data-f="q-text"><span class="lbl">検索</span>
+      <span class="search"><span class="ico" data-ico="search"></span>
+        <input id="q-text" type="search" placeholder="パスの一部（空白で区切ると全部を含むもの）" autocomplete="off"></span>
     </label>
-    <label class="field"><span>区分</span>
+    <label class="field" data-f="q-period"><span class="lbl"><span class="ico" data-ico="clock"></span>期間</span>
+      <select id="q-period" title="ファイルの更新日時で絞る">
+        <option value="">すべて</option>
+        <option value="today">今日</option>
+        <option value="7">7 日</option>
+        <option value="30">30 日</option>
+        <option value="90">90 日</option>
+        <option value="365">1 年</option>
+        <option value="older">1 年より前</option>
+        <option value="range">指定</option>
+      </select>
+    </label>
+    <span id="q-range" class="range" hidden>
+      <label class="field" data-f="q-from"><span class="lbl">開始</span><input id="q-from" type="date" title="この日を含む"></label>
+      <label class="field" data-f="q-to"><span class="lbl">終了</span><input id="q-to" type="date" title="この日を含む"></label>
+    </span>
+    <label class="field narrow" data-f="q-ext"><span class="lbl"><span class="ico" data-ico="file"></span>種類</span>
+      <input id="q-ext" type="text" placeholder="md" title="拡張子 (点なし)" autocomplete="off" spellcheck="false">
+    </label>
+    <label class="field" data-f="q-repo"><span class="lbl"><span class="ico" data-ico="repo"></span>リポジトリ</span>
+      <select id="q-repo"><option value="">すべて</option></select>
+    </label>
+    <span class="sep" aria-hidden="true"></span>
+    <label class="field" data-f="q-class"><span class="lbl"><span class="ico" data-ico="tagi"></span>区分</span>
       <select id="q-class">
         <option value="">すべて（生成以外）</option>
         <option value="personal">個人</option>
@@ -35,16 +61,7 @@
         <option value="generated">生成</option>
       </select>
     </label>
-    <label class="field"><span>状態</span>
-      <select id="q-state">
-        <option value="">すべて</option>
-        <option value="present">あり</option>
-        <option value="missing">消失</option>
-        <option value="moved">移動</option>
-        <option value="dismissed">了解</option>
-      </select>
-    </label>
-    <label class="field"><span>会話</span>
+    <label class="field" data-f="q-mention"><span class="lbl"><span class="ico" data-ico="talk"></span>会話</span>
       <select id="q-mention">
         <option value="">すべて</option>
         <option value="any">出た</option>
@@ -63,30 +80,17 @@
         </optgroup>
       </select>
     </label>
-    <label class="field"><span>リポジトリ</span>
-      <select id="q-repo"><option value="">すべて</option></select>
-    </label>
-    <label class="field narrow"><span>種類</span>
-      <input id="q-ext" type="text" placeholder="md" autocomplete="off" spellcheck="false">
-    </label>
-    <label class="field"><span>期間</span>
-      <select id="q-period" title="ファイルの更新日時で絞る">
+    <label class="field" data-f="q-state"><span class="lbl"><span class="ico" data-ico="state"></span>状態</span>
+      <select id="q-state">
         <option value="">すべて</option>
-        <option value="today">今日</option>
-        <option value="7">7 日</option>
-        <option value="30">30 日</option>
-        <option value="90">90 日</option>
-        <option value="365">1 年</option>
-        <option value="older">1 年より前</option>
-        <option value="range">指定</option>
+        <option value="present">あり</option>
+        <option value="missing">消失</option>
+        <option value="moved">移動</option>
+        <option value="dismissed">了解</option>
       </select>
     </label>
-    <span id="q-range" class="range" hidden>
-      <label class="field"><span>から</span><input id="q-from" type="date" title="この日を含む"></label>
-      <label class="field"><span>まで</span><input id="q-to" type="date" title="この日を含む"></label>
-    </span>
     <button id="clear" class="btn" type="button" title="絞り込みを全部外す">
-      <span class="ico" data-ico="clear"></span><span class="label">解除</span>
+      <span class="ico" data-ico="clear"></span><span class="label">解除</span><span id="clear-n" class="badge" hidden></span>
     </button>
   </section>
 
