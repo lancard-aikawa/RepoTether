@@ -51,6 +51,11 @@ pub fn refresh(store: &mut Store, repos: &[PathBuf], projects_dir: Option<&Path>
              分け方を古いものに戻さないよう、取り込みません。Offstage (RepoTether) を新しい版に入れ替えてください"
         ));
     }
+    // 人が対象外にしたリポジトリは洗い出さない (大文字小文字は区別しない。Windows のパス)
+    let excluded: Vec<String> = store.excluded_repos()?.iter().map(|r| r.to_lowercase()).collect();
+    let repos: Vec<PathBuf> =
+        repos.iter().filter(|r| !excluded.contains(&r.to_string_lossy().to_lowercase())).cloned().collect();
+    let repos = &repos[..];
     let mut rep = Report { repos: repos.len(), ..Default::default() };
     // git を呼ぶ部分 (無視されたものと資料の一覧) は、リポジトリごとに並べて回す。記録への書き込みは後でまとめて
     let jobs: Vec<(PathBuf, Vec<(String, crate::classify::Class)>)> = repos
@@ -116,6 +121,40 @@ fn parallel<T: Sync, R: Send>(items: &[T], workers: usize, f: impl Fn(&T) -> R +
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn excluded_repos_are_not_scanned_and_can_come_back() {
+        let t = std::env::temp_dir().join(format!("offstage-excl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        let repo = t.join("clone");
+        std::fs::create_dir_all(repo.join("sandbox")).unwrap();
+        let ok = std::process::Command::new("git").arg("-C").arg(&repo).args(["init", "-q"]).status().unwrap().success();
+        assert!(ok);
+        std::fs::write(repo.join(".gitignore"), "sandbox/\n").unwrap();
+        std::fs::write(repo.join("sandbox/memo.md"), "m").unwrap();
+        let mut s = crate::store::Store::open(&t.join("idx/index.sqlite")).unwrap();
+        let repos = vec![repo.clone()];
+        let rp = repo.to_string_lossy().into_owned();
+        super::refresh(&mut s, &repos, None).unwrap();
+        assert!(s.row_of(&rp, "sandbox/memo.md").unwrap().is_some());
+
+        // 対象外にすると記録から消え、次の取り込みでも洗い出さない (不明にもならない)
+        assert_eq!(s.exclude_repo(&rp).unwrap(), 1);
+        let r = super::refresh(&mut s, &repos, None).unwrap();
+        assert_eq!((r.repos, r.repos_gone), (0, 0));
+        assert!(s.row_of(&rp, "sandbox/memo.md").unwrap().is_none());
+        // 大文字小文字が違っても対象外
+        let upper = vec![std::path::PathBuf::from(rp.to_uppercase())];
+        assert_eq!(super::refresh(&mut s, &upper, None).unwrap().repos, 0);
+        assert_eq!(s.excluded_repos().unwrap(), vec![rp.clone()]);
+
+        // 戻すと、次の取り込みでまた洗い出す
+        assert!(s.include_repo(&rp).unwrap());
+        super::refresh(&mut s, &repos, None).unwrap();
+        assert!(s.row_of(&rp, "sandbox/memo.md").unwrap().is_some());
+        drop(s);
+        let _ = std::fs::remove_dir_all(&t);
+    }
+
     #[test]
     fn refuses_a_store_written_by_newer_rules() {
         let t = std::env::temp_dir().join(format!("offstage-rules-{}", std::process::id()));

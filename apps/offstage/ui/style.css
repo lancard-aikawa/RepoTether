@@ -302,3 +302,24 @@ tbody tr.group .cnt { margin-left: 8px; color: var(--muted); font-weight: 400; f
 .seg button:hover { background: var(--hover); color: var(--text); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); font-weight: 600; cursor: default; }
 .seg button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* 内訳: フォルダごとの区分別の件数。行そのものは押せない (押せるのは中のボタンと選択) */
+.breakdown { padding: 0 0 12px; }
+.breakdown[hidden] { display: none; }
+.grp {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 16px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+.grp .where { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.grp .where .trail { color: var(--muted); }
+.grp .where .name { font-weight: 600; }
+.grp .marks { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.grp .cnt { color: var(--muted); font-size: 12px; min-width: 40px; text-align: right; }
+.grp select { padding: 3px 6px; }
+.grp .btn { padding: 3px 10px; }
+.sum-h { font-size: 13px; color: var(--muted); margin: 16px 16px 4px; }
+.listbar label.inline { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--muted); }
+.listbar label.inline select { padding: 2px 6px; }
+#folder-chip[hidden] { display: none; }
+/* 詳細の理由: 名前はコードの書式 */
+.detail dd.why code { font-family: Consolas, monospace; font-size: 12px; background: var(--tag-bg); padding: 0 4px; }

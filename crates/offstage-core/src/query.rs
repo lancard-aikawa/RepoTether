@@ -33,6 +33,8 @@ pub struct Query {
     pub order: String,
     /// フォルダごと見当たらないリポジトリのもの: None (絞らない) / Some(false) (除く) / Some(true) (それだけ)
     pub gone: Option<bool>,
+    /// このフォルダ (リポジトリの中の相対パス) の中だけ。空なら絞らない
+    pub prefix: String,
     pub limit: usize,
 }
 
@@ -72,6 +74,26 @@ pub struct Alerts {
     pub repos: i64,
     pub files: i64,
     pub docs: i64,
+}
+
+/// 内訳の 1 行: フォルダごとの区分別の件数
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    pub repo: String,
+    /// リポジトリの中のフォルダ (区切りは `/`)。リポジトリの直下のファイルは ""
+    pub folder: String,
+    pub total: i64,
+    /// (区分, 件数)。件数の多い順
+    pub classes: Vec<(String, i64)>,
+    pub repo_gone: bool,
+}
+
+/// 内訳でまとめるフォルダ: ファイルの入っているフォルダの、上から `depth` 段まで
+pub fn group_folder(rel_path: &str, is_dir: bool, depth: usize) -> String {
+    let parts: Vec<&str> = rel_path.split('/').collect();
+    let dirs = if is_dir { &parts[..] } else { &parts[..parts.len().saturating_sub(1)] };
+    dirs[..dirs.len().min(depth.max(1))].join("/")
 }
 
 fn kinds_sql() -> String {
@@ -122,8 +144,8 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Row> {
 }
 
 impl Store {
-    /// 検索する。並びは 印のあるもの → 会話に出た新しいもの → パス
-    pub fn search(&self, q: &Query) -> Result<Vec<Row>, String> {
+    /// 検索の条件を SQL の WHERE にする (検索と内訳で同じ)
+    fn where_of(q: &Query) -> (String, Vec<String>) {
         let mut wh: Vec<String> = Vec::new();
         let mut args: Vec<String> = Vec::new();
         if !q.text.trim().is_empty() {
@@ -175,6 +197,18 @@ impl Store {
         if let Some(s) = q.until {
             wh.push(format!("u.mtime_ns < {}", s.saturating_mul(1_000_000_000)));
         }
+        if !q.prefix.is_empty() {
+            let p = q.prefix.trim_end_matches('/').to_string();
+            wh.push("(u.rel_path = ? OR substr(u.rel_path, 1, length(?) + 1) = ? || '/')".into());
+            args.extend([p.clone(), p.clone(), p]);
+        }
+        let w = if wh.is_empty() { String::new() } else { format!("WHERE {}", wh.join(" AND ")) };
+        (w, args)
+    }
+
+    /// 検索する。並びは 印のあるもの → 会話に出た新しいもの → パス
+    pub fn search(&self, q: &Query) -> Result<Vec<Row>, String> {
+        let (wh, args) = Self::where_of(q);
         let limit = if q.limit == 0 { 500 } else { q.limit.min(5000) };
         let order = match q.order.as_str() {
             "modified" => "(u.mtime_ns IS NULL), u.mtime_ns DESC, u.repo, u.rel_path",
@@ -185,11 +219,39 @@ impl Store {
         let sql = format!(
             "{} {} ORDER BY {order} LIMIT {limit}",
             union_sql(),
-            if wh.is_empty() { String::new() } else { format!("WHERE {}", wh.join(" AND ")) }
+            wh
         );
         let mut st = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = st.query_map(params_from_iter(args.iter()), row).map_err(|e| e.to_string())?;
         rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    }
+
+    /// 内訳: 検索と同じ条件に当たるものを、フォルダ (上から `depth` 段) ごとに区分別に数える。件数の多い順に `limit` 件
+    pub fn breakdown(&self, q: &Query, depth: usize, limit: usize) -> Result<Vec<Group>, String> {
+        use std::collections::HashMap;
+        let (wh, args) = Self::where_of(q);
+        let sql = format!("{} {}", union_sql(), wh);
+        let mut st = self.conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let rows = st.query_map(params_from_iter(args.iter()), row).map_err(|e| e.to_string())?;
+        let mut groups: HashMap<(String, String), (i64, HashMap<String, i64>, bool)> = HashMap::new();
+        for r in rows {
+            let r = r.map_err(|e| e.to_string())?;
+            let key = (r.repo.clone(), group_folder(&r.rel_path, r.is_dir, depth));
+            let g = groups.entry(key).or_insert_with(|| (0, HashMap::new(), r.repo_gone));
+            g.0 += 1;
+            *g.1.entry(r.class).or_insert(0) += 1;
+        }
+        let mut out: Vec<Group> = groups
+            .into_iter()
+            .map(|((repo, folder), (total, by, repo_gone))| {
+                let mut classes: Vec<(String, i64)> = by.into_iter().collect();
+                classes.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+                Group { repo, folder, total, classes, repo_gone }
+            })
+            .collect();
+        out.sort_by(|a, b| b.total.cmp(&a.total).then(a.repo.cmp(&b.repo)).then(a.folder.cmp(&b.folder)));
+        out.truncate(limit);
+        Ok(out)
     }
 
     /// 1 件
@@ -372,6 +434,54 @@ mod tests {
         assert_eq!((all[0].rel_path.as_str(), all[0].state.as_str()), ("sandbox/memo.md", "missing"));
         let a = s.alerts().unwrap();
         assert_eq!((a.missing, a.files, a.docs, a.repos), (1, 3, 1, 1));
+        drop(s);
+        let _ = fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn breakdown_counts_by_folder_and_prefix_filters() {
+        assert_eq!(group_folder("a/b/c/d.md", false, 2), "a/b");
+        assert_eq!(group_folder("a/d.md", false, 2), "a");
+        assert_eq!(group_folder("d.md", false, 2), "");
+        assert_eq!(group_folder("a/b/c", true, 2), "a/b");
+        assert_eq!(group_folder("a/b/c/d.md", false, 0), "a"); // 0 段は 1 段として扱う
+
+        let t = std::env::temp_dir().join(format!("offstage-breakdown-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&t);
+        let s = Store::open(&t.join("index.sqlite")).unwrap();
+        for (p, c) in [
+            ("sandbox/a.md", "personal"),
+            ("sandbox/b.md", "personal"),
+            ("sandbox/data/x.csv", "data"),
+            ("sandboxes/c.md", "personal"),
+            ("top.md", "personal"),
+        ] {
+            s.conn
+                .execute(
+                    "INSERT INTO files (repo, rel_path, class, is_dir, size, mtime_ns, sha256, folded, first_seen, last_seen, state, state_since)
+                     VALUES ('R', ?1, ?2, 0, 1, NULL, NULL, NULL, 1, 1, 'present', 1)",
+                    params![p, c],
+                )
+                .unwrap();
+        }
+        let g = s.breakdown(&Query::default(), 1, 10).unwrap();
+        let flat: Vec<(String, i64, Vec<(String, i64)>)> = g.iter().map(|g| (g.folder.clone(), g.total, g.classes.clone())).collect();
+        assert_eq!(
+            flat,
+            vec![
+                ("sandbox".into(), 3, vec![("personal".into(), 2), ("data".into(), 1)]),
+                ("".into(), 1, vec![("personal".into(), 1)]),
+                ("sandboxes".into(), 1, vec![("personal".into(), 1)]),
+            ]
+        );
+        // 区分で絞ってから数える
+        let g = s.breakdown(&Query { classes: vec!["data".into()], ..Default::default() }, 2, 10).unwrap();
+        assert_eq!((g.len(), g[0].folder.as_str()), (1, "sandbox/data"));
+        // フォルダで絞る: 前方一致は区切りで (sandboxes は入らない)
+        let names: Vec<String> =
+            s.search(&Query { prefix: "sandbox".into(), ..Default::default() }).unwrap().into_iter().map(|r| r.rel_path).collect();
+        assert_eq!(names.len(), 3);
+        assert!(names.iter().all(|n| n.starts_with("sandbox/")));
         drop(s);
         let _ = fs::remove_dir_all(&t);
     }

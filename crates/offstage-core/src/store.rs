@@ -73,6 +73,18 @@ fn normalize(p: &Path) -> String {
     p.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_lowercase()
 }
 
+/// リポジトリの記録を全部消す (ファイル・資料・会話の場面・付け替え・リポジトリ)。消したファイルと資料の件数を返す
+fn drop_repo_rows(tx: &rusqlite::Transaction, repo: &str) -> Result<usize, String> {
+    let mut n = 0;
+    for table in ["files", "docs"] {
+        n += tx.execute(&format!("DELETE FROM {table} WHERE repo = ?1"), params![repo]).map_err(|e| e.to_string())?;
+    }
+    for table in ["mentions", "overrides", "repos"] {
+        tx.execute(&format!("DELETE FROM {table} WHERE repo = ?1"), params![repo]).map_err(|e| e.to_string())?;
+    }
+    Ok(n)
+}
+
 fn unix_now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
@@ -142,6 +154,8 @@ impl Store {
              );
              CREATE INDEX IF NOT EXISTS files_sha ON files(sha256);
              CREATE INDEX IF NOT EXISTS files_state ON files(state);
+             -- 人が対象外にしたリポジトリ (よその写しなど)。取り込まず、記録も持たない
+             CREATE TABLE IF NOT EXISTS excluded (repo TEXT PRIMARY KEY, since INTEGER NOT NULL);
              -- 記録そのものの情報 (rules: 書いたときの分け方の版。classify::RULES_VERSION)
              CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS repos (
@@ -375,6 +389,34 @@ impl Store {
             .map_err(|e| e.to_string())
     }
 
+    /// リポジトリを対象外にする (よその写しなど)。記録からも外し、外したファイルと資料の件数を返す
+    pub fn exclude_repo(&mut self, repo: &str) -> Result<usize, String> {
+        let tx = self.conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute(
+            "INSERT INTO excluded (repo, since) VALUES (?1, ?2) ON CONFLICT(repo) DO NOTHING",
+            params![repo, unix_now()],
+        )
+        .map_err(|e| e.to_string())?;
+        let n = drop_repo_rows(&tx, repo)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(n)
+    }
+
+    /// 対象外を戻す (次の取り込みから、また洗い出す)
+    pub fn include_repo(&self, repo: &str) -> Result<bool, String> {
+        self.conn
+            .execute("DELETE FROM excluded WHERE repo = ?1", params![repo])
+            .map(|n| n > 0)
+            .map_err(|e| e.to_string())
+    }
+
+    /// 対象外にしたリポジトリ (古い順)
+    pub fn excluded_repos(&self) -> Result<Vec<String>, String> {
+        let mut st = self.conn.prepare("SELECT repo FROM excluded ORDER BY since, repo").map_err(|e| e.to_string())?;
+        let rows = st.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?;
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())
+    }
+
     /// フォルダごと見当たらないリポジトリを、記録から外す (ファイル・資料・会話の場面・付け替え)。
     /// 外したファイルと資料の件数を返す。見当たらない印の無いリポジトリと、フォルダが今あるリポジトリは外さない
     pub fn forget_repo(&mut self, repo: &str) -> Result<usize, String> {
@@ -390,13 +432,7 @@ impl Store {
             return Err("フォルダがあります。次の取り込みで見当たらない印が外れます".into());
         }
         let tx = self.conn.transaction().map_err(|e| e.to_string())?;
-        let mut n = 0;
-        for table in ["files", "docs"] {
-            n += tx.execute(&format!("DELETE FROM {table} WHERE repo = ?1"), params![repo]).map_err(|e| e.to_string())?;
-        }
-        for table in ["mentions", "overrides", "repos"] {
-            tx.execute(&format!("DELETE FROM {table} WHERE repo = ?1"), params![repo]).map_err(|e| e.to_string())?;
-        }
+        let n = drop_repo_rows(&tx, repo)?;
         tx.commit().map_err(|e| e.to_string())?;
         Ok(n)
     }

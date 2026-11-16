@@ -2,10 +2,11 @@
 // 通信しない: 依存に通信するクレートを入れず、画面は CSP で ipc: 以外につながない (tests/no_network.rs)
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use offstage_core::classify::{secret_rule_of, Class};
+use offstage_core::classify::Class;
+use offstage_core::scan::reason_for;
 use offstage_core::link::{default_projects_dir, Mention};
 use offstage_core::pipeline::{refresh as run_refresh, Report};
-use offstage_core::query::{Alerts, Query, Row};
+use offstage_core::query::{Alerts, Group, Query, Row};
 use offstage_core::repos::{find_repos, repotether_config_path, roots_from_config};
 use offstage_core::store::{default_store_path, Store};
 use regex::Regex;
@@ -76,6 +77,8 @@ struct Overview {
     settings: Settings,
     alerts: Option<Alerts>,
     repos: Vec<(String, bool)>,
+    /// 人が対象外にしたリポジトリ
+    excluded: Vec<String>,
     error: Option<String>,
 }
 
@@ -83,7 +86,9 @@ struct Overview {
 fn overview(st: St) -> Overview {
     let alerts = with_store(&st, |s| s.alerts());
     let repos = with_store(&st, |s| s.repos()).unwrap_or_default();
+    let excluded = with_store(&st, |s| s.excluded_repos()).unwrap_or_default();
     Overview {
+        excluded,
         settings: st.settings.clone(),
         error: alerts.as_ref().err().cloned(),
         alerts: alerts.ok(),
@@ -106,6 +111,47 @@ async fn refresh(st: St<'_>) -> Result<Report, String> {
 #[tauri::command]
 fn search(st: St, q: Query) -> Result<Vec<Row>, String> {
     with_store(&st, |s| s.search(&q))
+}
+
+/// 内訳: 検索と同じ条件で、フォルダ (上から depth 段) ごとの区分別の件数。多い順に 300 件まで
+#[tauri::command]
+fn breakdown(st: St, q: Query, depth: usize) -> Result<Vec<Group>, String> {
+    with_store(&st, |s| s.breakdown(&q, depth.clamp(1, 6), 300))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoInfo {
+    /// 自分のコミットの数 (自分が分からなければ None)
+    own_commits: Option<usize>,
+    origin: Option<String>,
+}
+
+/// リポジトリの持ち主の手がかり (詳細で、よその写しなら対象外を勧める)。git を呼ぶので、記録の鍵は持たない
+#[tauri::command]
+async fn repo_info(repo: String) -> Result<RepoInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (own_commits, origin) = offstage_core::scan::own_commits(Path::new(&repo));
+        RepoInfo { own_commits, origin }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// リポジトリを対象外にする (記録からも外す)
+#[tauri::command]
+fn exclude_repo(st: St, repo: String) -> Result<usize, String> {
+    with_store(&st, |s| {
+        let n = s.exclude_repo(&repo)?;
+        let _ = s.write_summary();
+        Ok(n)
+    })
+}
+
+/// 対象外を戻す (次の取り込みから、また洗い出す)
+#[tauri::command]
+fn include_repo(st: St, repo: String) -> Result<bool, String> {
+    with_store(&st, |s| s.include_repo(&repo))
 }
 
 #[derive(Serialize)]
@@ -135,14 +181,15 @@ struct Detail {
 fn detail(st: St, repo: String, rel_path: String) -> Result<Option<Detail>, String> {
     let got = with_store(&st, |s| {
         let Some(row) = s.row_of(&repo, &rel_path)? else { return Ok(None) };
-        Ok(Some((row, s.override_of(&repo, &rel_path)?, s.mentions_of(&repo, &rel_path)?)))
+        Ok(Some((row, s.override_of(&repo, &rel_path)?, s.mentions_of(&repo, &rel_path)?, s.overrides_for(&repo)?)))
     })?;
-    let Some((row, override_of, mentions)) = got else { return Ok(None) };
+    let Some((row, override_of, mentions, ov)) = got else { return Ok(None) };
     let abs = Path::new(&repo).join(&rel_path);
+    // 畳んだフォルダはその理由 (画面で文にする)、それ以外は規則の理由。資料は git の管理下にある種類だから
     let rule = match (&row.folded, row.class.as_str()) {
         (Some(f), _) => Some(f.clone()),
-        (None, "secret") => secret_rule_of(&rel_path),
-        _ => None,
+        (None, "doc") => Some("git が管理している、資料の種類のファイル".into()),
+        _ => Some(reason_for(Path::new(&repo), &rel_path, row.is_dir, &ov)),
     };
     let scenes = mentions
         .into_iter()
@@ -384,7 +431,7 @@ fn main() {
     tauri::Builder::default()
         .manage(state)
         .invoke_handler(tauri::generate_handler![
-            overview, refresh, search, detail, scene, dismiss, forget_repo, set_class, clear_class, reveal, open_file
+            overview, refresh, search, breakdown, repo_info, exclude_repo, include_repo, detail, scene, dismiss, forget_repo, set_class, clear_class, reveal, open_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running Offstage");

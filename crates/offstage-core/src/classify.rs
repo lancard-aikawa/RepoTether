@@ -128,52 +128,70 @@ const SECRET_EXTS: &[&str] = &["pem", "key", "p12", "pfx", "jks", "keystore"];
 /// リポジトリの中の相対パス (区切りは `/` でも `\` でもよい) を分ける。
 /// `is_dir` はパスがフォルダを指すとき true。
 pub fn classify(rel_path: &str, is_dir: bool) -> Class {
+    classify_why(rel_path, is_dir).0
+}
+
+/// 分けて、その理由も返す (画面の「なぜこの区分か」)。理由は人が読む短い文
+pub fn classify_why(rel_path: &str, is_dir: bool) -> (Class, String) {
     let parts: Vec<&str> = rel_path
         .split(['/', '\\'])
         .filter(|p| !p.is_empty())
         .collect();
     let Some((last, parents)) = parts.split_last() else {
-        return Class::Personal;
+        return (Class::Personal, "どの規則にも当たらない".into());
     };
+    let folder = |p: &str| format!("`{p}/` の中");
 
     // 途中のフォルダに生成物のフォルダがあれば、その下は全部生成物
-    if parents.iter().any(|p| is_generated_dir(p)) {
-        return Class::Generated;
+    if let Some(p) = parents.iter().find(|p| is_generated_dir(p)) {
+        return (Class::Generated, format!("{} (作り直せるもののフォルダ)", folder(p)));
     }
-    let in_tool_dir = parents.iter().any(|p| is_tool_dir(p));
-    let in_data_dir = parents.iter().any(|p| is_data_dir(p));
+    let tool_dir = parents.iter().find(|p| is_tool_dir(p));
+    let data_dir = parents.iter().find(|p| is_data_dir(p));
     if is_dir {
         return if is_generated_dir(last) {
-            Class::Generated
-        } else if in_data_dir || is_data_dir(last) {
-            Class::Data
-        } else if in_tool_dir || is_tool_dir(last) {
-            Class::ToolData
+            (Class::Generated, format!("`{last}/` は作り直せるもののフォルダ"))
+        } else if let Some(p) = data_dir {
+            (Class::Data, format!("{} (データのフォルダ)", folder(p)))
+        } else if is_data_dir(last) {
+            (Class::Data, format!("`{last}/` はデータのフォルダ"))
+        } else if let Some(p) = tool_dir {
+            (Class::ToolData, format!("{} (道具が書くフォルダ)", folder(p)))
+        } else if is_tool_dir(last) {
+            (Class::ToolData, format!("`{last}/` は道具が書くフォルダ"))
         } else {
-            Class::Personal
+            (Class::Personal, "どの規則にも当たらない".into())
         };
     }
 
     let name = last.to_ascii_lowercase();
     let ext = name.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
 
-    if GENERATED_FILES.contains(&name.as_str())
-        || GENERATED_EXTS.contains(&ext)
-        || GENERATED_PREFIXES.iter().any(|p| name.starts_with(p))
-        || GENERATED_SUFFIXES.iter().any(|s| name.ends_with(s))
-    {
-        return Class::Generated;
+    if GENERATED_FILES.contains(&name.as_str()) {
+        return (Class::Generated, format!("`{last}` は作り直せるファイル"));
     }
-    if secret_rule(&name, ext).is_some() {
-        return Class::Secret;
+    if GENERATED_EXTS.contains(&ext) {
+        return (Class::Generated, format!("拡張子 `.{ext}` は作り直せるファイル"));
     }
-    if in_data_dir {
-        return Class::Data;
+    if let Some(x) = GENERATED_PREFIXES.iter().find(|x| name.starts_with(*x)).or_else(|| GENERATED_SUFFIXES.iter().find(|x| name.ends_with(*x))) {
+        return (Class::Generated, format!("名前の `{x}` は作り直せるファイル"));
     }
-    if in_tool_dir || TOOL_FILES.contains(&name.as_str()) || TOOL_EXTS.contains(&ext) {
-        return Class::ToolData;
+    if let Some(r) = secret_rule(&name, ext) {
+        return (Class::Secret, format!("機密らしい名前 ({r})"));
     }
-    Class::Personal
+    if let Some(p) = data_dir {
+        return (Class::Data, format!("{} (データのフォルダ)", folder(p)));
+    }
+    if let Some(p) = tool_dir {
+        return (Class::ToolData, format!("{} (道具が書くフォルダ)", folder(p)));
+    }
+    if TOOL_FILES.contains(&name.as_str()) {
+        return (Class::ToolData, format!("`{last}` は道具が書くファイル"));
+    }
+    if TOOL_EXTS.contains(&ext) {
+        return (Class::ToolData, format!("拡張子 `.{ext}` は道具が書くファイル"));
+    }
+    (Class::Personal, "どの規則にも当たらない".into())
 }
 
 /// この名前のフォルダの中はデータ

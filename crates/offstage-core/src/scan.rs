@@ -25,6 +25,38 @@ pub fn git_command() -> Command {
     cmd
 }
 
+/// そのリポジトリでの、自分 (git の user.email か user.name) のコミットの数と、取り込み元 (origin) の URL。
+/// 自分のコミットが無いリポジトリは、よその写しかもしれない (画面で対象外を勧めるのに使う)。
+/// 自分が分からない (user.email も user.name も無い) ときは数は None
+pub fn own_commits(repo: &Path) -> (Option<usize>, Option<String>) {
+    let run = |args: &[&str]| -> Option<String> {
+        let out = git_command()
+            .arg("-C")
+            .arg(repo)
+            .args(["-c", "core.fsmonitor=false"])
+            .args(args)
+            .output()
+            .ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    let origin = run(&["remote", "get-url", "origin"]).filter(|s| !s.is_empty());
+    let ids: Vec<String> = ["user.email", "user.name"]
+        .iter()
+        .filter_map(|k| run(&["config", k]))
+        .filter(|v| !v.is_empty())
+        .collect();
+    if ids.is_empty() {
+        return (None, origin);
+    }
+    // --author は正規表現なので、--fixed-strings で文字のまま比べる。複数の --author はどれかに当たればよい
+    let mut args: Vec<String> = vec!["log".into(), "--format=%H".into(), "--fixed-strings".into()];
+    args.extend(ids.iter().map(|v| format!("--author={v}")));
+    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    // コミットが 1 つも無いリポジトリでは git log が失敗する (0 として扱う)
+    let n = run(&refs).map(|s| s.lines().filter(|l| !l.is_empty()).count()).unwrap_or(0);
+    (Some(n), origin)
+}
+
 /// 見つかったファイル 1 件
 #[derive(Debug, Clone)]
 pub struct Entry {
@@ -121,6 +153,27 @@ fn in_app_platform(repo: &Path, rel: &str) -> bool {
             APP_PROJECT_MARKERS.iter().any(|m| project.join(m).is_file())
         }
     })
+}
+
+/// 洗い出しで付く区分の理由 (画面の「なぜこの区分か」)。[`class_in`] と同じ順で見る
+pub fn reason_for(repo: &Path, rel: &str, is_dir: bool, ov: &Overrides) -> String {
+    if let Some((p, c)) = ov
+        .iter()
+        .filter(|(p, _)| rel == p || (rel.len() > p.len() && rel.starts_with(p.as_str()) && rel.as_bytes()[p.len()] == b'/'))
+        .max_by_key(|(p, _)| p.len())
+    {
+        return format!("付け替え: `{p}` を {} にした", c.label());
+    }
+    let (c, why) = crate::classify::classify_why(rel, is_dir);
+    if !is_dir && matches!(c, Class::Personal | Class::ToolData | Class::Data) {
+        if in_app_platform(repo, rel) {
+            return "Flutter・Capacitor のプロジェクトの機種ごとのフォルダ (雛形と作り直されるもの)".into();
+        }
+        if in_wrangler_assets(repo, rel) {
+            return "wrangler の設定にある配るファイルの置き場 (ビルドが並べ直す写し)".into();
+        }
+    }
+    why
 }
 
 /// Cloudflare Workers の設定 (wrangler) に書かれた、配るファイルの置き場 (`assets.directory`・古い `site.bucket`)。
@@ -413,6 +466,29 @@ mod tests {
         let note = scan.entries.iter().find(|e| e.rel_path == "sandbox/sub/note.txt").unwrap();
         assert_eq!(note.size, 2);
         assert!(note.modified.is_some());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn counts_own_commits() {
+        let dir = std::env::temp_dir().join(format!("offstage-own-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["config", "user.email", "me@example.invalid"]);
+        git(&dir, &["config", "user.name", "Me (test)"]);
+        // コミットが無い
+        assert_eq!(own_commits(&dir).0, Some(0));
+        fs::write(dir.join("a.txt"), "a").unwrap();
+        git(&dir, &["add", "a.txt"]);
+        git(&dir, &["-c", "user.email=other@example.invalid", "-c", "user.name=Other", "commit", "-q", "-m", "theirs"]);
+        assert_eq!(own_commits(&dir).0, Some(0));
+        fs::write(dir.join("b.txt"), "b").unwrap();
+        git(&dir, &["add", "b.txt"]);
+        git(&dir, &["commit", "-q", "-m", "mine"]); // 名前の ( ) は文字として比べる
+        assert_eq!(own_commits(&dir).0, Some(1));
+        git(&dir, &["remote", "add", "origin", "https://example.invalid/someone/clone.git"]);
+        assert_eq!(own_commits(&dir).1.as_deref(), Some("https://example.invalid/someone/clone.git"));
         let _ = fs::remove_dir_all(&dir);
     }
 

@@ -46,6 +46,10 @@ const ICONS = {
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
+/// 理由の文: `名前` をコードの書式にする (ほかは文字のまま)
+function codeText(s) {
+  return esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+}
 function ico(name) {
   return `<span class="ico">${ICONS[name] || ""}</span>`;
 }
@@ -130,6 +134,10 @@ function period() {
 let rows = [];
 let selected = null; // {repo, relPath}
 let alertFilter = ""; // missing / moved / sent / ""
+/// 内訳の「一覧」で絞ったフォルダ ({repo, folder})。null なら絞らない
+let folderFilter = null;
+/// 人が対象外にしたリポジトリ (overview から)
+let excludedRepos = [];
 
 document.querySelectorAll("[data-ico]").forEach((el) => (el.innerHTML = ICONS[el.dataset.ico] || ""));
 
@@ -155,11 +163,16 @@ function query() {
     q.classes = ["secret"];
     q.mention = "content";
   }
+  if (folderFilter) {
+    q.repo = folderFilter.repo;
+    q.prefix = folderFilter.folder;
+  }
   return q;
 }
 
 async function loadOverview() {
   const o = await invoke("overview");
+  excludedRepos = o.excluded || [];
   const a = o.alerts || {};
   const cards = [
     ["missing", "消失", a.missing, "前回あって、今はディスクに無いファイル", "hot"],
@@ -190,6 +203,8 @@ async function loadOverview() {
 }
 
 async function loadRows() {
+  renderFolderChip();
+  if (viewMode === "sum") return loadBreakdown();
   try {
     rows = await invoke("search", { q: query() });
   } catch (e) {
@@ -213,7 +228,7 @@ const TREE_AUTO_EXPAND = 200;
 let viewMode = "table";
 try {
   const v = localStorage.getItem("offstage.view");
-  if (v === "tree" || v === "time") viewMode = v;
+  if (v === "tree" || v === "time" || v === "sum") viewMode = v;
 } catch {}
 /// ツリーで開いているフォルダ (リポジトリ|パス)
 let expanded = new Set();
@@ -238,13 +253,94 @@ function isSel(r) {
 
 function renderList() {
   const tree = viewMode === "tree";
-  $("table").hidden = tree;
+  const sum = viewMode === "sum";
+  $("table").hidden = tree || sum;
   $("tree").hidden = !tree;
+  $("breakdown").hidden = !sum;
   $("tree-tools").hidden = !tree;
-  for (const m of ["table", "tree", "time"]) $(`view-${m}`).setAttribute("aria-pressed", String(viewMode === m));
+  $("sum-tools").hidden = !sum;
+  for (const m of ["table", "tree", "time", "sum"]) $(`view-${m}`).setAttribute("aria-pressed", String(viewMode === m));
+  if (sum) return;
   if (tree) renderTree();
   else renderTable();
 }
+
+/// 内訳の「一覧」で絞ったフォルダの札 (押すと外す)
+function renderFolderChip() {
+  const c = $("folder-chip");
+  c.hidden = !folderFilter;
+  if (folderFilter) c.innerHTML = `${ico("clear")}${esc(base(folderFilter.repo))}/${esc(folderFilter.folder || "")}`;
+}
+$("folder-chip").onclick = () => {
+  folderFilter = null;
+  loadRows();
+};
+
+/// 内訳: フォルダごとの区分別の件数。件数の多いフォルダから、まとめて区分を付け替えられる
+async function loadBreakdown() {
+  renderList();
+  let groups;
+  try {
+    groups = await invoke("breakdown", { q: query(), depth: Number($("sum-depth").value) });
+  } catch (e) {
+    $("breakdown").innerHTML = `<p class="err">${esc(e)}</p>`;
+    return;
+  }
+  $("count").textContent = `${groups.length} フォルダ${groups.length >= 300 ? "（多い順に 300）" : ""}`;
+  $("empty").hidden = groups.length > 0;
+  $("empty").textContent = groups.length ? "" : "当てはまるものがありません";
+  const choices = ["personal", "data", "tooldata", "secret", "generated"];
+  const html = groups.map((g, i) => {
+    const top = g.classes.find(([c]) => c !== "doc")?.[0];
+    // 直下のファイルはまとめて付け替えない (リポジトリ全部に効いてしまう)。資料だけのフォルダと不明のリポジトリも
+    const can = g.folder !== "" && !!top && !g.repoGone;
+    const why = g.folder === "" ? "リポジトリの直下のファイルは、まとめて付け替えません" : !top ? "資料 (git の管理下) は付け替えられません" : g.repoGone ? "フォルダごと見当たらないリポジトリです" : "このフォルダの中を、選んだ区分にする (次の取り込みからも効く)";
+    return `<div class="grp" data-g="${i}">
+      <span class="where" title="${esc(g.repo)}"><span class="trail">${esc(base(g.repo))}/</span><span class="name">${g.folder ? `${esc(g.folder)}/` : "（直下のファイル）"}</span></span>
+      <span class="marks">${g.classes.map(([c, n]) => tag(c, `${CLASS[c] || c} ${n}`)).join("")}</span>
+      <span class="cnt">${g.total}</span>
+      <select class="g-class" title="付け替える区分"${can ? "" : " disabled"}>${choices.map((c) => `<option value="${c}"${c === top ? " selected" : ""}>${CLASS[c]}</option>`).join("")}</select>
+      <button type="button" class="btn g-set" title="${esc(why)}"${can ? "" : " disabled"}>${ico("apply")}変更</button>
+      <button type="button" class="btn g-list" title="このフォルダの中だけを一覧で見る">${ico("open")}一覧</button>
+    </div>`;
+  });
+  const ex = excludedRepos.length
+    ? `<h3 class="sum-h">対象外のリポジトリ</h3>` +
+      excludedRepos
+        .map((r) => `<div class="grp"><span class="where" title="${esc(r)}"><span class="name">${esc(base(r))}</span> <span class="trail">${esc(r)}</span></span>
+          <button type="button" class="btn g-include" data-repo="${esc(r)}" title="次の取り込みから、また洗い出す">${ico("undo")}戻す</button></div>`)
+        .join("")
+    : "";
+  $("breakdown").innerHTML = html.join("") + ex;
+  $("breakdown").querySelectorAll(".grp[data-g]").forEach((el) => {
+    const g = groups[el.dataset.g];
+    el.querySelector(".g-set").onclick = () => {
+      const cls = el.querySelector(".g-class").value;
+      invoke("set_class", { repo: g.repo, relPrefix: g.folder, class: cls })
+        .then(async () => {
+          await loadOverview();
+          await loadBreakdown();
+          $("status").textContent = `${base(g.repo)}/${g.folder}/ を「${CLASS[cls]}」にしました`;
+        })
+        .catch(alertError);
+    };
+    el.querySelector(".g-list").onclick = () => {
+      folderFilter = { repo: g.repo, folder: g.folder };
+      setView("table");
+    };
+  });
+  $("breakdown").querySelectorAll(".g-include").forEach((b) => {
+    b.onclick = () =>
+      invoke("include_repo", { repo: b.dataset.repo })
+        .then(async () => {
+          await loadOverview();
+          await loadBreakdown();
+          $("status").textContent = `${base(b.dataset.repo)} を対象に戻しました。次の「更新」で取り込みます`;
+        })
+        .catch(alertError);
+  });
+}
+$("sum-depth").addEventListener("change", loadRows);
 
 /// 一覧の表。時系列では、更新の新しい順に今日・昨日・…の見出しで区切る (見出しは押せない)
 function renderTable() {
@@ -352,6 +448,7 @@ function setView(mode) {
 $("view-table").onclick = () => setView("table");
 $("view-tree").onclick = () => setView("tree");
 $("view-time").onclick = () => setView("time");
+$("view-sum").onclick = () => setView("sum");
 $("tree-expand").onclick = () => {
   expanded = new Set(folderKeys());
   renderTree();
@@ -411,7 +508,7 @@ async function showDetail(repo, relPath) {
       ${r.lastMention ? `<dt>最後の会話</dt><dd>${esc(when(Date.parse(r.lastMention) / 1000))}</dd>` : ""}
       ${r.stateSince && r.state !== "present" ? `<dt>${esc(STATE[r.state])}</dt><dd>${esc(when(r.stateSince))} に気づいた</dd>` : ""}
       ${r.movedTo ? `<dt>移動先</dt><dd>${esc(r.movedTo)}</dd>` : ""}
-      ${d.rule ? `<dt>規則</dt><dd>${esc(RULE[d.rule] || d.rule)}</dd>` : ""}
+      ${d.rule ? `<dt>理由</dt><dd class="why">${codeText(RULE[d.rule] || d.rule)}</dd>` : ""}
       ${ov ? `<dt>上書き</dt><dd>${esc(ov[0])} → ${esc(CLASS[ov[1]] || ov[1])}</dd>` : ""}
     </dl>
     <div class="actions">
@@ -449,6 +546,15 @@ async function showDetail(repo, relPath) {
     <p class="note">「生成」にしたフォルダは、次の取り込みから中を見ません。</p>`
         : ""
     }
+    ${
+      r.repoGone
+        ? ""
+        : `<h3>リポジトリ</h3>
+    <p class="note" id="repo-info">${esc(base(r.repo))} を調べています…</p>
+    <div class="actions">
+      <button type="button" class="btn danger" id="act-exclude" title="このリポジトリを取り込みの対象から外し、記録からも外す（2 回押して確定。内訳の画面から戻せる）">${ico("clear")}対象外</button>
+    </div>`
+    }
     <h3>会話 ${d.scenes.length ? `（${d.scenes.length}）` : ""}</h3>
     <div id="scene-kinds" class="roles" role="group" aria-label="表示する出方"></div>
     <div id="scene-list"></div>`;
@@ -456,6 +562,42 @@ async function showDetail(repo, relPath) {
   $("act-open").onclick = () => invoke("reveal", { repo, relPath }).catch(alertError);
   $("act-launch").onclick = () => invoke("open_file", { repo, relPath }).catch(alertError);
   if ($("act-ok")) $("act-ok").onclick = () => invoke("dismiss", { repo, relPath }).then(reloadAll).catch(alertError);
+  // リポジトリの持ち主の手がかり (git を呼ぶので後から埋める)。別の行を選び直していたら書かない
+  if ($("repo-info"))
+    invoke("repo_info", { repo })
+      .then((info) => {
+        const el = $("repo-info");
+        if (!el || !selected || selected.repo !== repo) return;
+        const from = info.origin ? `取り込み元 ${info.origin}` : "取り込み元 (origin) なし";
+        if (info.ownCommits == null) el.textContent = `${from}。git の user.email / user.name が無いので、自分のコミットは数えていません。`;
+        else if (info.ownCommits === 0)
+          el.innerHTML = `${esc(from)}。<strong>自分のコミットがありません。</strong>よその写しなら「対象外」にすると、一覧と資料から外れます。`;
+        else el.textContent = `${from}。自分のコミット ${info.ownCommits} 件。`;
+      })
+      .catch(() => {});
+  if ($("act-exclude"))
+    $("act-exclude").onclick = async (ev) => {
+      const b = ev.currentTarget;
+      if (!b.dataset.armed) {
+        b.dataset.armed = "1";
+        b.innerHTML = `${ico("clear")}確定`;
+        b.title = "もう一度押すと、このリポジトリを対象外にする";
+        return;
+      }
+      b.disabled = true;
+      try {
+        const n = await invoke("exclude_repo", { repo });
+        selected = null;
+        $("detail").innerHTML = `<p class="hint">一覧の行を選ぶと、ここに場所・区分・会話に出た場面が出ます。</p>`;
+        if (folderFilter && folderFilter.repo === repo) folderFilter = null;
+        if ($("q-repo").value === repo) $("q-repo").value = "";
+        await reloadAll();
+        $("status").textContent = `${base(repo)} を対象外にしました（記録から ${n} 件を外しました。「内訳」の下から戻せます）`;
+      } catch (e) {
+        b.disabled = false;
+        alertError(e);
+      }
+    };
   // 不明のリポジトリを外す: 取り消せないので 2 回押して確定
   if ($("act-forget"))
     $("act-forget").onclick = async (ev) => {
@@ -713,6 +855,7 @@ $("clear").onclick = () => {
   for (const id of ["q-class", "q-state", "q-mention", "q-repo", "q-period"]) $(id).value = "";
   $("q-range").hidden = true;
   alertFilter = "";
+  folderFilter = null;
   loadOverview().then(loadRows);
 };
 
@@ -729,7 +872,7 @@ $("clear").onclick = () => {
       await loadRows();
     }
   }
-  if (["tree", "table", "time"].includes(s.view) && s.view !== viewMode) {
+  if (["tree", "table", "time", "sum"].includes(s.view) && s.view !== viewMode) {
     viewMode = s.view;
     await loadRows();
   }
